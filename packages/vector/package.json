@@ -1,0 +1,23 @@
+{
+  "name": "@libra-ai/vector",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "@libra-ai/env": "workspace:*",
+    "@pinecone-database/pinecone": "^7.1.0"
+  },
+  "devDependencies": {
+    "@libra-ai/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

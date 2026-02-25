@@ -9,23 +9,23 @@ import SignUpForm from "@/components/sign-up-form";
 import { useAuthStore } from "@/lib/auth-store";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const status = useAuthStore((state) => state.status);
-  const [showSignIn, setShowSignIn] = useState(true);
+	const router = useRouter();
+	const status = useAuthStore((state) => state.status);
+	const [showSignIn, setShowSignIn] = useState(true);
 
-  useEffect(() => {
-    if (status === "authenticated") {
-      router.replace("/dashboard");
-    }
-  }, [router, status]);
+	useEffect(() => {
+		if (status === "authenticated") {
+			router.replace("/dashboard");
+		}
+	}, [router, status]);
 
-  if (status !== "unauthenticated") {
-    return <Loader />;
-  }
+	if (status !== "unauthenticated") {
+		return <Loader />;
+	}
 
-  return showSignIn ? (
-    <SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
-  ) : (
-    <SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
-  );
+	return showSignIn ? (
+		<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
+	) : (
+		<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
+	);
 }

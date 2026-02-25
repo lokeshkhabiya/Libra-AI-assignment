@@ -1,0 +1,23 @@
+{
+  "name": "@libra-ai/queue",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "bullmq": "^5.61.2",
+    "ioredis": "^5.8.1"
+  },
+  "devDependencies": {
+    "@libra-ai/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
