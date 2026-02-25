@@ -1,0 +1,43 @@
+{
+  "name": "libra-ai",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "dotenv": "^17.2.2",
+      "zod": "^4.1.13",
+      "typescript": "^5",
+      "@types/bun": "^1.3.4",
+      "better-auth": "^1.4.18",
+      "@prisma/client": "^7.2.0"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "check-types": "turbo check-types",
+    "dev:native": "turbo -F native dev",
+    "dev:web": "turbo -F web dev",
+    "dev:server": "turbo -F server dev",
+    "db:push": "turbo -F @libra-ai/db db:push",
+    "db:studio": "turbo -F @libra-ai/db db:studio",
+    "db:generate": "turbo -F @libra-ai/db db:generate",
+    "db:migrate": "turbo -F @libra-ai/db db:migrate"
+  },
+  "dependencies": {
+    "@libra-ai/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@libra-ai/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "turbo": "^2.6.3",
+    "typescript": "catalog:"
+  },
+  "packageManager": "bun@1.3.0"
+}

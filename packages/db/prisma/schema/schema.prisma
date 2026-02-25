@@ -1,0 +1,275 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated"
+  moduleFormat = "esm"
+  runtime      = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enums
+
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum StepKind {
+  PLAN
+  TOOL
+  OBSERVE
+  FINALIZE
+}
+
+enum ToolName {
+  WEB_SEARCH
+  WEB_SCRAPE
+  DRIVE_RETRIEVE
+  VECTOR_SEARCH
+}
+
+enum SourceType {
+  WEB
+  DRIVE
+}
+
+enum DriveProvider {
+  GOOGLE_DRIVE
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  EXPIRED
+  REVOKED
+}
+
+enum IngestionStatus {
+  PENDING
+  INDEXED
+  FAILED
+  SKIPPED
+}
+
+// Auth
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  // App domain
+  agentTasks        AgentTask[]
+  driveConnections  DriveConnection[]
+  driveFiles        DriveFile[]
+  driveChunks       DriveChunk[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String   @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model AgentTask {
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String?
+  prompt         String      @db.Text
+  model          String?
+  status         TaskStatus  @default(QUEUED)
+  maxSteps       Int         @default(12)
+  stepsCompleted Int         @default(0)
+  resultJson     Json?
+  errorMessage   String?     @db.Text
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  steps          AgentStep[]
+  citations      TaskCitation[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("agent_task")
+}
+
+model AgentStep {
+  id        String     @id @default(cuid())
+  taskId    String
+  task      AgentTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  stepNumber Int
+  kind      StepKind
+  toolName  ToolName?
+  status    StepStatus @default(PENDING)
+  input     Json?
+  output    Json?
+  summary   String?    @db.Text
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  citations TaskCitation[]
+
+  @@unique([taskId, stepNumber])
+  @@index([taskId, status])
+  @@map("agent_step")
+}
+
+model TaskCitation {
+  id         String      @id @default(cuid())
+  taskId      String
+  task        AgentTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  stepId      String?
+  step        AgentStep?  @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  sourceType  SourceType
+  title       String?
+  sourceUrl   String?
+  excerpt     String?     @db.Text
+  driveFileId String?
+  driveFile   DriveFile?  @relation(fields: [driveFileId], references: [id], onDelete: SetNull)
+  rank        Int?
+  score       Float?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([taskId, rank])
+  @@index([driveFileId])
+  @@map("task_citation")
+}
+
+// Google Drive ingestion + vector mapping
+
+model DriveConnection {
+  id                    String           @id @default(cuid())
+  userId                String
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider              DriveProvider    @default(GOOGLE_DRIVE)
+  status                ConnectionStatus @default(CONNECTED)
+  googleAccountEmail    String?
+  accessTokenEncrypted  String?          @db.Text
+  refreshTokenEncrypted String?          @db.Text
+  tokenExpiresAt        DateTime?
+  syncCursor            String?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  files                 DriveFile[]
+
+  @@unique([userId, provider])
+  @@index([status])
+  @@map("drive_connection")
+}
+
+model DriveFile {
+  id                String          @id @default(cuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionId      String
+  connection        DriveConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  googleFileId      String
+  name              String
+  mimeType          String
+  webViewLink       String?
+  contentHash       String?
+  modifiedAtGoogle  DateTime?
+  lastIndexedAt     DateTime?
+  indexStatus       IngestionStatus @default(PENDING)
+  indexError        String?         @db.Text
+  chunkCount        Int             @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  chunks            DriveChunk[]
+  citations         TaskCitation[]
+
+  @@unique([userId, googleFileId])
+  @@index([userId, modifiedAtGoogle])
+  @@index([indexStatus])
+  @@map("drive_file")
+}
+
+model DriveChunk {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  driveFileId    String
+  driveFile      DriveFile @relation(fields: [driveFileId], references: [id], onDelete: Cascade)
+  chunkIndex     Int
+  content        String    @db.Text
+  tokenCount     Int?
+  namespace      String
+  vectorId       String?
+  embeddingModel String
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([driveFileId, chunkIndex])
+  @@unique([namespace, vectorId])
+  @@index([userId, namespace])
+  @@index([driveFileId])
+  @@map("drive_chunk")
+}

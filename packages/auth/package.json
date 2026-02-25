@@ -1,0 +1,24 @@
+{
+  "name": "@libra-ai/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@libra-ai/db": "workspace:*",
+    "@libra-ai/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@libra-ai/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

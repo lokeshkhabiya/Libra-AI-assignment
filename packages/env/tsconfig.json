@@ -1,0 +1,3 @@
+{
+  "extends": "@libra-ai/config/tsconfig.base.json"
+}
