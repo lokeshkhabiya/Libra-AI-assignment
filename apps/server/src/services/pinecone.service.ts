@@ -1,9 +1,10 @@
-import { env } from "@libra-ai/env/server";
-import { Pinecone } from "@pinecone-database/pinecone";
-
-const pc = new Pinecone({ apiKey: env.PINECONE_API_KEY });
-
-const index = pc.index({ name: env.PINECONE_INDEX });
+import {
+	deleteByFilter,
+	deleteNamespace,
+	getIndexStats as vectorGetIndexStats,
+	query,
+	upsert,
+} from "@libra-ai/vector";
 
 export type DocumentRecord = {
 	_id: string;
@@ -29,36 +30,31 @@ export async function upsertDocuments(
 	userId: string,
 	records: DocumentRecord[],
 ): Promise<void> {
-	const namespace = `user_${userId}`;
-	const BATCH_SIZE = 96;
-
-	for (let i = 0; i < records.length; i += BATCH_SIZE) {
-		const batch = records.slice(i, i + BATCH_SIZE);
-		await index.namespace(namespace).upsertRecords({ records: batch });
-	}
+	await upsert<DocumentRecord>({ userId, records });
 }
 
 export async function searchDocuments(
 	userId: string,
-	query: string,
+	queryText: string,
 	topK: number = 5,
 ): Promise<SearchResult[]> {
-	const namespace = `user_${userId}`;
-
-	const results = await index.namespace(namespace).searchRecords({
-		query: {
-			topK: topK * 2,
-			inputs: { text: query },
-		},
-		rerank: {
-			model: "bge-reranker-v2-m3",
-			topN: topK,
-			rankFields: ["content"],
+	const results = await query({
+		userId,
+		options: {
+			query: {
+				topK: topK * 2,
+				inputs: { text: queryText },
+			},
+			rerank: {
+				model: "bge-reranker-v2-m3",
+				topN: topK,
+				rankFields: ["content"],
+			},
 		},
 	});
 
-	return results.result.hits.map((hit) => {
-		const fields = hit.fields as Record<string, unknown>;
+	return results.result.hits.map((hit: any) => {
+		const fields = hit.fields as Record<string, unknown> | undefined;
 		return {
 			id: hit._id,
 			score: hit._score,
@@ -74,39 +70,18 @@ export async function deleteFileRecords(
 	userId: string,
 	fileId: string,
 ): Promise<void> {
-	const namespace = `user_${userId}`;
-
-	const allIds: string[] = [];
-	let paginationToken: string | undefined;
-
-	while (true) {
-		const result = await index.namespace(namespace).listPaginated({
-			prefix: `${fileId}_`,
-			limit: 1000,
-			paginationToken,
-		});
-
-		const vectors = result.vectors ?? [];
-		for (const v of vectors) {
-			if (v.id) allIds.push(v.id);
-		}
-
-		if (!result.pagination?.next) break;
-		paginationToken = result.pagination.next;
-	}
-
-	if (allIds.length > 0) {
-		await index.namespace(namespace).deleteMany(allIds);
-	}
+	await deleteByFilter({
+		userId,
+		filter: { fileId },
+	});
 }
 
 export async function deleteUserNamespace(userId: string): Promise<void> {
-	const namespace = `user_${userId}`;
-	await index.namespace(namespace).deleteAll();
+	await deleteNamespace(userId);
 }
 
 export async function getIndexStats(userId?: string) {
-	const stats = await index.describeIndexStats();
+	const stats = await vectorGetIndexStats();
 
 	if (userId) {
 		const namespace = `user_${userId}`;

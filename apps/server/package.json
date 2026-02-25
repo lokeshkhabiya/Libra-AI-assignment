@@ -13,6 +13,7 @@
     "@libra-ai/auth": "workspace:*",
     "@libra-ai/db": "workspace:*",
     "@libra-ai/env": "workspace:*",
+    "@libra-ai/vector": "workspace:*",
     "@pinecone-database/pinecone": "^7.1.0",
     "better-auth": "catalog:",
     "cors": "^2.8.5",
