@@ -2,7 +2,7 @@ generator client {
   provider     = "prisma-client"
   output       = "../generated"
   moduleFormat = "esm"
-  runtime      = "bun"
+  runtime      = "nodejs"
 }
 
 datasource db {
@@ -236,6 +236,9 @@ model DriveFile {
   webViewLink       String?
   contentHash       String?
   modifiedAtGoogle  DateTime?
+  isDeleted         Boolean         @default(false)
+  deletedAt         DateTime?
+  deletedAtGoogle   DateTime?
   lastIndexedAt     DateTime?
   indexStatus       IngestionStatus @default(PENDING)
   indexError        String?         @db.Text
@@ -247,6 +250,7 @@ model DriveFile {
 
   @@unique([userId, googleFileId])
   @@index([userId, modifiedAtGoogle])
+  @@index([userId, isDeleted, updatedAt])
   @@index([indexStatus])
   @@map("drive_file")
 }

@@ -1,32 +1,28 @@
 {
-  "name": "server",
+  "name": "worker",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
+    "dev": "bun --watch src/index.ts",
     "build": "tsdown",
     "check-types": "tsc -b",
-    "compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
-    "dev": "bun run --hot src/index.ts",
-    "start": "bun run dist/index.mjs",
     "test": "bun test"
   },
   "dependencies": {
-    "@libra-ai/auth": "workspace:*",
     "@libra-ai/db": "workspace:*",
     "@libra-ai/drive-core": "workspace:*",
     "@libra-ai/env": "workspace:*",
     "@libra-ai/queue": "workspace:*",
-    "better-auth": "catalog:",
-    "cors": "^2.8.5",
+    "@libra-ai/vector": "workspace:*",
+    "bullmq": "^5.70.1",
     "dotenv": "catalog:",
-    "express": "^5.1.0",
-    "zod": "catalog:"
+    "googleapis": "^166.0.0",
+    "openai": "^5.21.0",
+    "pdf-parse": "^2.4.4"
   },
   "devDependencies": {
     "@libra-ai/config": "workspace:*",
     "@types/bun": "catalog:",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.1",
     "tsdown": "^0.16.5",
     "typescript": "catalog:"
   }
