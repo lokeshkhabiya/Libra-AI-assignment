@@ -7,6 +7,7 @@ import express from "express";
 
 import { errorHandler } from "@/middleware/error";
 import driveRouter from "@/routers/drive.router";
+import tasksRouter from "@/routers/tasks.router";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use(
 app.use(express.json());
 app.all("/api/auth{/*path}", toNodeHandler(auth));
 app.use("/api/drive", driveRouter);
+app.use("/api/tasks", tasksRouter);
 
 app.get("/", (_req, res) => {
 	res.status(200).send("OK");
