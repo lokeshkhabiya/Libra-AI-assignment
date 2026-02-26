@@ -634,9 +634,9 @@ flowchart TD
 
     CHUNK --> EMBED[Generate Embeddings<br/>OpenAI text-embedding-3-small<br/>Batch size: 96]
 
-    EMBED --> UPSERT[Upsert to Pinecone<br/>Namespace: user_(userId)<br/>ID: drive_(fileId)_(chunkIdx)]
+    EMBED --> UPSERT[Upsert to Pinecone]
 
-    UPSERT --> DB_UPDATE[Update Database<br/>Create DriveChunk records<br/>Set indexStatus → INDEXED]
+    UPSERT --> DB_UPDATE[Update Database records]
 
     style EXTRACT fill:#818cf8,color:#fff
     style CHUNK fill:#f59e0b,color:#fff
