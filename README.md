@@ -280,7 +280,7 @@ The agent is a custom-built autonomous execution engine with no framework depend
 ```mermaid
 flowchart TD
     START([User submits task]) --> LOAD[Load task from DB<br/>Set status → RUNNING]
-    LOAD --> PLAN[🧠 PLANNER<br/>Generate execution plan]
+    LOAD --> PLAN[PLANNER<br/>Generate execution plan]
     PLAN --> EMIT_PLAN[Emit 'plan' SSE event<br/>Persist PLAN step to DB]
     EMIT_PLAN --> CHECK{Pending steps<br/>remaining?}
 
@@ -288,14 +288,14 @@ flowchart TD
     CHECK -->|No| FINAL
 
     ABORT -->|Yes| CANCEL[Set status → CANCELED]
-    ABORT -->|No| TOOL[⚡ EXECUTE TOOL<br/>Run next planned step]
+    ABORT -->|No| TOOL[EXECUTE TOOL<br/>Run next planned step]
 
     TOOL --> EMIT_STEP[Emit 'step:complete' SSE<br/>Persist TOOL step to DB]
     EMIT_STEP --> COLLECT[Collect evidence +<br/>citations from result]
     COLLECT --> LIMIT{stepsCompleted<br/>≥ maxSteps?}
 
     LIMIT -->|Yes| FINAL
-    LIMIT -->|No| OBSERVE[👁️ OBSERVER<br/>Evaluate progress]
+    LIMIT -->|No| OBSERVE[OBSERVER<br/>Evaluate progress]
 
     OBSERVE --> EMIT_OBS[Emit 'observe' SSE event<br/>Persist OBSERVE step to DB]
     EMIT_OBS --> DECISION{Observer<br/>action?}
@@ -305,7 +305,7 @@ flowchart TD
     DECISION -->|finalize| FINAL
     APPEND --> CHECK
 
-    FINAL[📝 FINALIZER<br/>Synthesize answer from evidence] --> PERSIST[Persist result + citations<br/>Set status → COMPLETED]
+    FINAL[FINALIZER<br/>Synthesize answer from evidence] --> PERSIST[Persist result + citations<br/>Set status → COMPLETED]
     PERSIST --> EMIT_DONE[Emit 'complete' SSE event]
     EMIT_DONE --> END([Done])
 
@@ -622,7 +622,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    JOB([drive.ingest job]) --> EXTRACT[📄 Extract Text]
+    JOB([drive.ingest job]) --> EXTRACT[Extract Text]
 
     EXTRACT --> DOCS[Google Docs<br/>Export as text/plain]
     EXTRACT --> PDF[PDFs<br/>Download binary]
@@ -630,13 +630,13 @@ flowchart TD
 
     DOCS & PDF & TXT --> NORMALIZE[Normalize Text<br/>Remove null bytes,<br/>collapse whitespace]
 
-    NORMALIZE --> CHUNK[✂️ Chunk Text<br/>~500 tokens per chunk<br/>50 token overlap]
+    NORMALIZE --> CHUNK[Chunk Text<br/>~500 tokens per chunk<br/>50 token overlap]
 
-    CHUNK --> EMBED[🧮 Generate Embeddings<br/>OpenAI text-embedding-3-small<br/>Batch size: 96]
+    CHUNK --> EMBED[Generate Embeddings<br/>OpenAI text-embedding-3-small<br/>Batch size: 96]
 
-    EMBED --> UPSERT[📌 Upsert to Pinecone<br/>Namespace: user_{userId}<br/>ID: drive_{fileId}_{chunkIdx}]
+    EMBED --> UPSERT[Upsert to Pinecone<br/>Namespace: user_(userId)<br/>ID: drive_(fileId)_(chunkIdx)]
 
-    UPSERT --> DB_UPDATE[💾 Update Database<br/>Create DriveChunk records<br/>Set indexStatus → INDEXED]
+    UPSERT --> DB_UPDATE[Update Database<br/>Create DriveChunk records<br/>Set indexStatus → INDEXED]
 
     style EXTRACT fill:#818cf8,color:#fff
     style CHUNK fill:#f59e0b,color:#fff
