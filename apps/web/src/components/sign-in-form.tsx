@@ -73,7 +73,7 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
 	}
 
 	return (
-		<div className="mx-auto w-full max-w-md p-6">
+		<div className="mx-auto w-full max-w-md p-6 rounded-lg border">
 			<h1 className="mb-6 text-center text-3xl font-bold">Welcome Back</h1>
 
 			<form

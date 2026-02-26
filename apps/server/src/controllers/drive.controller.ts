@@ -1,6 +1,10 @@
 import prisma from "@libra-ai/db";
 import { env } from "@libra-ai/env/server";
-import { driveSyncQueue } from "@libra-ai/queue";
+import {
+	driveIngestQueue,
+	enqueueDriveSyncJob,
+	findQueuedDriveSyncJob,
+} from "@libra-ai/queue";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 
@@ -10,12 +14,18 @@ import {
 	createDriveOAuthUrl,
 	deleteUserNamespace,
 	exchangeCodeAndUpsertConnection,
-	FULL_SYNC_JOB_NAME,
 	getAuthorizedDriveClient,
+	INGEST_JOB_NAME,
 	revokeConnectionTokens,
 	sanitizeDbText,
+	SUPPORTED_MIME_TYPES,
 	verifyDriveOAuthState,
 } from "@libra-ai/drive-core";
+import {
+	buildDriveFileContentHash,
+	normalizePickerGoogleFileIds,
+	shouldQueuePickerIngest,
+} from "@/controllers/drive-picker-utils";
 
 const syncPayloadSchema = z.object({
 	forceFullSync: z.boolean().optional(),
@@ -35,6 +45,14 @@ const driveFileParamsSchema = z.object({
 	fileId: z.string().min(1),
 });
 
+const pickerSelectPayloadSchema = z.object({
+	googleFileIds: z.array(z.string().min(1)).min(1).max(20),
+});
+
+const pickerTokenResponseSchema = z.object({
+	accessToken: z.string().min(1),
+});
+
 const toClientRedirectUrl = (path: string, params?: Record<string, string>): string => {
 	const url = new URL(path, env.CORS_ORIGIN);
 	if (params) {
@@ -46,6 +64,22 @@ const toClientRedirectUrl = (path: string, params?: Record<string, string>): str
 	return url.toString();
 };
 
+const DEFAULT_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+const getAutoSyncIntervalMs = (): number => {
+	const rawValue = process.env.DRIVE_AUTO_SYNC_INTERVAL_MS;
+	if (!rawValue) {
+		return DEFAULT_AUTO_SYNC_INTERVAL_MS;
+	}
+
+	const parsed = Number.parseInt(rawValue, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return DEFAULT_AUTO_SYNC_INTERVAL_MS;
+	}
+
+	return parsed;
+};
+
 const ensureAuth = (req: Request): AuthenticatedRequest => {
 	const typed = req as AuthenticatedRequest;
 	if (!typed.auth?.user?.id) {
@@ -54,41 +88,32 @@ const ensureAuth = (req: Request): AuthenticatedRequest => {
 	return typed;
 };
 
-const findQueuedSyncJob = async (
-	driveConnectionId: string,
-): Promise<{ id: string } | null> => {
-	const jobs = await driveSyncQueue.getJobs(["waiting", "active", "delayed", "prioritized"]);
-	const matchingJob = jobs.find((job) => job.data.driveConnectionId === driveConnectionId);
-	if (!matchingJob) {
+const toDate = (value: string | null | undefined): Date | null => {
+	if (!value) {
 		return null;
 	}
 
-	return { id: String(matchingJob.id) };
-};
-
-const enqueueDriveSyncJob = async (params: {
-	driveConnectionId: string;
-	userId: string;
-	forceFullSync: boolean;
-}): Promise<{ jobId: string; alreadyQueued: boolean }> => {
-	const queuedJob = await findQueuedSyncJob(params.driveConnectionId);
-	if (queuedJob) {
-		return {
-			jobId: queuedJob.id,
-			alreadyQueued: true,
-		};
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) {
+		return null;
 	}
 
-	const queuedAt = Date.now();
-	const job = await driveSyncQueue.add(
-		FULL_SYNC_JOB_NAME,
+	return parsed;
+};
+
+const enqueueIngestJob = async (params: {
+	driveFileId: string;
+	userId: string;
+	forceReingest: boolean;
+}) => {
+	await driveIngestQueue.add(
+		INGEST_JOB_NAME,
 		{
-			driveConnectionId: params.driveConnectionId,
+			driveFileId: params.driveFileId,
 			userId: params.userId,
-			forceFullSync: params.forceFullSync,
+			forceReingest: params.forceReingest,
 		},
 		{
-			jobId: `sync-${params.driveConnectionId}-${queuedAt}`,
 			attempts: 3,
 			backoff: {
 				type: "exponential",
@@ -96,11 +121,6 @@ const enqueueDriveSyncJob = async (params: {
 			},
 		},
 	);
-
-	return {
-		jobId: String(job.id),
-		alreadyQueued: false,
-	};
 };
 
 export const connectDriveController = async (
@@ -206,6 +226,9 @@ export const driveStatusController = async (
 				filesIndexed: 0,
 				filesPending: 0,
 				filesFailed: 0,
+				syncJobQueued: false,
+				autoSyncEnabled: true,
+				autoSyncIntervalMs: getAutoSyncIntervalMs(),
 			});
 			return;
 		}
@@ -222,6 +245,7 @@ export const driveStatusController = async (
 		const filesIndexed = countByStatus["INDEXED"] ?? 0;
 		const filesPending = countByStatus["PENDING"] ?? 0;
 		const filesFailed = countByStatus["FAILED"] ?? 0;
+		const queuedSyncJob = await findQueuedDriveSyncJob(connection.id);
 
 		res.json({
 			connected: connection.status === "CONNECTED",
@@ -231,6 +255,9 @@ export const driveStatusController = async (
 			filesIndexed,
 			filesPending,
 			filesFailed,
+			syncJobQueued: Boolean(queuedSyncJob),
+			autoSyncEnabled: true,
+			autoSyncIntervalMs: getAutoSyncIntervalMs(),
 		});
 	} catch (error) {
 		next(error);
@@ -272,6 +299,200 @@ export const syncDriveController = async (
 			queued: !queueResult.alreadyQueued,
 			alreadyQueued: queueResult.alreadyQueued,
 			jobId: queueResult.jobId,
+		});
+	} catch (error) {
+		next(error);
+	}
+};
+
+export const drivePickerTokenController = async (
+	req: Request,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const authReq = ensureAuth(req);
+		const connection = await prisma.driveConnection.findUnique({
+			where: {
+				userId_provider: {
+					userId: authReq.auth.user.id,
+					provider: "GOOGLE_DRIVE",
+				},
+			},
+		});
+
+		if (!connection || connection.status !== "CONNECTED") {
+			throw new ApiError(400, "NO_ACTIVE_CONNECTION", "Google Drive is not connected");
+		}
+
+		const { oauthClient } = await getAuthorizedDriveClient({
+			userId: authReq.auth.user.id,
+			connectionId: connection.id,
+		});
+		const accessToken = oauthClient?.credentials?.access_token as string | undefined;
+
+		const payload = pickerTokenResponseSchema.safeParse({
+			accessToken,
+		});
+		if (!payload.success) {
+			throw new ApiError(500, "MISSING_ACCESS_TOKEN", "Unable to create picker token");
+		}
+
+		res.json(payload.data);
+	} catch (error) {
+		next(error);
+	}
+};
+
+export const drivePickerSelectController = async (
+	req: Request,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const authReq = ensureAuth(req);
+		const body = pickerSelectPayloadSchema.safeParse(req.body ?? {});
+		if (!body.success) {
+			throw new ApiError(400, "INVALID_PAYLOAD", body.error.message);
+		}
+
+		const connection = await prisma.driveConnection.findUnique({
+			where: {
+				userId_provider: {
+					userId: authReq.auth.user.id,
+					provider: "GOOGLE_DRIVE",
+				},
+			},
+		});
+		if (!connection || connection.status !== "CONNECTED") {
+			throw new ApiError(400, "NO_ACTIVE_CONNECTION", "Google Drive is not connected");
+		}
+
+		const { drive } = await getAuthorizedDriveClient({
+			userId: authReq.auth.user.id,
+			connectionId: connection.id,
+		});
+
+		const dedupedGoogleFileIds = normalizePickerGoogleFileIds(
+			body.data.googleFileIds.map((id) => sanitizeDbText(id)),
+		);
+
+		const attachedFiles: Array<{
+			driveFileId: string;
+			googleFileId: string;
+			name: string;
+			mimeType: string;
+			indexStatus: "PENDING" | "INDEXED" | "FAILED" | "SKIPPED";
+			alreadyIndexed: boolean;
+		}> = [];
+		const rejectedFiles: Array<{ googleFileId: string; reason: string }> = [];
+		let queuedCount = 0;
+
+		for (const googleFileId of dedupedGoogleFileIds) {
+			const fileResponse = await drive.files.get({
+				fileId: googleFileId,
+				supportsAllDrives: true,
+				fields: "id,name,mimeType,modifiedTime,md5Checksum,webViewLink,trashed",
+			});
+			const file = fileResponse.data;
+			if (!file.id || !file.name || !file.mimeType || file.trashed) {
+				rejectedFiles.push({ googleFileId, reason: "File is unavailable or trashed" });
+				continue;
+			}
+			if (!SUPPORTED_MIME_TYPES.has(file.mimeType)) {
+				rejectedFiles.push({
+					googleFileId,
+					reason: `Unsupported mime type: ${file.mimeType}`,
+				});
+				continue;
+			}
+
+			const existing = await prisma.driveFile.findUnique({
+				where: {
+					userId_googleFileId: {
+						userId: authReq.auth.user.id,
+						googleFileId: file.id,
+					},
+				},
+				select: {
+					id: true,
+					contentHash: true,
+					isDeleted: true,
+					indexStatus: true,
+				},
+			});
+
+			const contentHash = buildDriveFileContentHash({
+				id: file.id,
+				modifiedTime: file.modifiedTime ?? null,
+				md5Checksum: file.md5Checksum ?? null,
+			});
+			const hasChanged = shouldQueuePickerIngest({
+				existing,
+				contentHash,
+			});
+			const nextIndexStatus: "PENDING" | "INDEXED" | "FAILED" | "SKIPPED" = hasChanged
+				? "PENDING"
+				: (existing?.indexStatus ?? "PENDING");
+
+			const driveFile = await prisma.driveFile.upsert({
+				where: {
+					userId_googleFileId: {
+						userId: authReq.auth.user.id,
+						googleFileId: file.id,
+					},
+				},
+				create: {
+					userId: authReq.auth.user.id,
+					connectionId: connection.id,
+					googleFileId: file.id,
+					name: sanitizeDbText(file.name),
+					mimeType: file.mimeType,
+					webViewLink: file.webViewLink ? sanitizeDbText(file.webViewLink) : null,
+					contentHash,
+					modifiedAtGoogle: toDate(file.modifiedTime),
+					isDeleted: false,
+					deletedAt: null,
+					deletedAtGoogle: null,
+					indexStatus: nextIndexStatus,
+				},
+				update: {
+					name: sanitizeDbText(file.name),
+					mimeType: file.mimeType,
+					webViewLink: file.webViewLink ? sanitizeDbText(file.webViewLink) : null,
+					contentHash,
+					modifiedAtGoogle: toDate(file.modifiedTime),
+					isDeleted: false,
+					deletedAt: null,
+					deletedAtGoogle: null,
+					indexStatus: nextIndexStatus,
+					indexError: hasChanged ? null : undefined,
+				},
+			});
+
+			if (hasChanged) {
+				await enqueueIngestJob({
+					driveFileId: driveFile.id,
+					userId: authReq.auth.user.id,
+					forceReingest: Boolean(existing),
+				});
+				queuedCount += 1;
+			}
+
+			attachedFiles.push({
+				driveFileId: driveFile.id,
+				googleFileId: file.id,
+				name: driveFile.name,
+				mimeType: driveFile.mimeType,
+				indexStatus: driveFile.indexStatus,
+				alreadyIndexed: !hasChanged && driveFile.indexStatus === "INDEXED",
+			});
+		}
+
+		res.status(202).json({
+			attachedFiles,
+			rejectedFiles,
+			queuedCount,
 		});
 	} catch (error) {
 		next(error);

@@ -74,6 +74,7 @@ export type AgentEvent =
 		taskId: string;
 		stepId: string;
 		stepNumber: number;
+		planStepIndex: number;
 		toolName: AgentToolName;
 		description: string;
 	}
@@ -82,6 +83,7 @@ export type AgentEvent =
 		taskId: string;
 		stepId: string;
 		stepNumber: number;
+		planStepIndex: number;
 		toolName: AgentToolName;
 		success: boolean;
 		summary: string;

@@ -306,6 +306,21 @@ export const streamTaskController = async (
 				startedAt: true,
 				endedAt: true,
 				updatedAt: true,
+				steps: {
+					orderBy: { stepNumber: "asc" },
+					select: {
+						id: true,
+						stepNumber: true,
+						kind: true,
+						toolName: true,
+						status: true,
+						input: true,
+						output: true,
+						summary: true,
+						startedAt: true,
+						endedAt: true,
+					},
+				},
 			},
 		});
 
@@ -313,6 +328,62 @@ export const streamTaskController = async (
 			type: "snapshot",
 			task: currentSnapshot,
 		});
+
+		// Replay missed events from existing steps so the client catches up
+		if (currentSnapshot?.steps && currentSnapshot.steps.length > 0) {
+			const planStep = currentSnapshot.steps.find((s) => s.kind === "PLAN");
+			if (planStep?.output) {
+				const planOutput = planStep.output as Record<string, unknown>;
+				if (Array.isArray(planOutput.steps)) {
+					writeEvent({
+						type: "plan",
+						taskId: task.id,
+						steps: planOutput.steps,
+					});
+				}
+			}
+
+			let replayPlanStepIndex = 0;
+			for (const step of currentSnapshot.steps) {
+				if (step.kind === "TOOL") {
+					writeEvent({
+						type: "step:start",
+						taskId: task.id,
+						stepId: step.id,
+						stepNumber: step.stepNumber,
+						planStepIndex: replayPlanStepIndex,
+						toolName: step.toolName,
+						description: step.summary ?? `Step ${step.stepNumber}`,
+					});
+
+					if (step.status === "COMPLETED" || step.status === "FAILED") {
+						writeEvent({
+							type: "step:complete",
+							taskId: task.id,
+							stepId: step.id,
+							stepNumber: step.stepNumber,
+							planStepIndex: replayPlanStepIndex,
+							toolName: step.toolName,
+							success: step.status === "COMPLETED",
+							summary: step.summary,
+						});
+					}
+
+					replayPlanStepIndex += 1;
+				}
+
+				if (step.kind === "OBSERVE") {
+					const observeOutput = step.output as Record<string, unknown> | null;
+					writeEvent({
+						type: "observe",
+						taskId: task.id,
+						action: observeOutput?.action ?? "continue",
+						reasoning: step.summary ?? "",
+						appendedSteps: 0,
+					});
+				}
+			}
+		}
 
 		const unsubscribe = await subscribeToTaskEvents(task.id, (event) => {
 			writeEvent(event);

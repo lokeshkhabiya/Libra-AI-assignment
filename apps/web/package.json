@@ -24,6 +24,7 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
+    "react-pdf": "^10.4.1",
     "remark-gfm": "^4.0.1",
     "shadcn": "^3.6.2",
     "sonner": "^2.0.5",

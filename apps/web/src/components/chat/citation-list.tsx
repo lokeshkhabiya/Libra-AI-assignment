@@ -11,7 +11,7 @@ export default function CitationList({ citations }: { citations: TaskCitation[] 
 	if (!citations || citations.length === 0) return null;
 
 	return (
-		<div className="mt-3 flex flex-wrap gap-1.5">
+		<div className="mt-4 flex flex-wrap gap-2">
 			{citations.map((citation, index) => {
 				const isWeb = citation.sourceType === "WEB";
 				const isDrive = citation.sourceType === "DRIVE";
@@ -20,7 +20,7 @@ export default function CitationList({ citations }: { citations: TaskCitation[] 
 					<button
 						key={citation.id || index}
 						type="button"
-						className="inline-flex items-center gap-1 rounded-sm border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+						className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 					onClick={() => {
 						if (isWeb && citation.sourceUrl) {
 							window.open(citation.sourceUrl, "_blank", "noopener");
@@ -33,7 +33,7 @@ export default function CitationList({ citations }: { citations: TaskCitation[] 
 						}
 					}}
 				>
-						{isWeb ? <ExternalLink className="size-2.5" /> : <FileText className="size-2.5" />}
+						{isWeb ? <ExternalLink className="size-3" /> : <FileText className="size-3" />}
 						<span className="max-w-[200px] truncate">
 							[{index + 1}] {citation.title || "Source"}
 						</span>

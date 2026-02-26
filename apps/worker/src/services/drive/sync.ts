@@ -147,45 +147,13 @@ const markDeleted = async (params: {
 	]);
 };
 
-const listAllSupportedFiles = async (drive: any): Promise<DriveFileSnapshot[]> => {
-	const files: DriveFileSnapshot[] = [];
-	let pageToken: string | undefined;
-
-	while (true) {
-		const response = await drive.files.list({
-			includeItemsFromAllDrives: true,
-			supportsAllDrives: true,
-			q: "trashed = false",
-			fields:
-				"nextPageToken, files(id,name,mimeType,modifiedTime,md5Checksum,webViewLink,trashed)",
-			pageSize: MAX_DRIVE_FILE_PAGE_SIZE,
-			pageToken,
-		});
-
-		const pageFiles = response.data.files ?? [];
-		for (const pageFile of pageFiles) {
-			const mapped = mapGoogleFile(pageFile);
-			if (mapped) {
-				files.push(mapped);
-			}
-		}
-
-		pageToken = response.data.nextPageToken ?? undefined;
-		if (!pageToken) {
-			break;
-		}
-	}
-
-	return files;
-};
-
 const syncSingleFile = async (params: {
 	connectionId: string;
 	userId: string;
 	snapshot: DriveFileSnapshot;
 	existing?: ExistingDriveFileState & { id: string };
 	forceReingest: boolean;
-}) => {
+}): Promise<{ hasChanged: boolean }> => {
 	const hasChanged = shouldReingestSnapshot({
 		forceReingest: params.forceReingest,
 		snapshotContentHash: params.snapshot.contentHash,
@@ -240,6 +208,8 @@ const syncSingleFile = async (params: {
 			forceReingest: Boolean(params.existing),
 		});
 	}
+
+	return { hasChanged };
 };
 
 const runFullSync = async (params: {
@@ -247,6 +217,11 @@ const runFullSync = async (params: {
 	userId: string;
 	driveConnectionId: string;
 }) => {
+	console.log("[drive.sync] starting full sync", {
+		userId: params.userId,
+		driveConnectionId: params.driveConnectionId,
+	});
+
 	const existingFiles = await prisma.driveFile.findMany({
 		where: {
 			userId: params.userId,
@@ -266,21 +241,56 @@ const runFullSync = async (params: {
 	);
 
 	const seenGoogleFileIds = new Set<string>();
-	const snapshots = await listAllSupportedFiles(params.drive);
+	let pageToken: string | undefined;
+	let pagesProcessed = 0;
+	let filesScanned = 0;
+	let supportedFiles = 0;
+	let ingestQueued = 0;
 
-	for (const snapshot of snapshots) {
-		seenGoogleFileIds.add(snapshot.googleFileId);
-		const existing = existingByGoogleId.get(snapshot.googleFileId);
-
-		await syncSingleFile({
-			connectionId: params.driveConnectionId,
-			userId: params.userId,
-			snapshot,
-			existing,
-			forceReingest: false,
+	while (true) {
+		const response = await params.drive.files.list({
+			includeItemsFromAllDrives: true,
+			supportsAllDrives: true,
+			q: "trashed = false",
+			fields:
+				"nextPageToken, files(id,name,mimeType,modifiedTime,md5Checksum,webViewLink,trashed)",
+			pageSize: MAX_DRIVE_FILE_PAGE_SIZE,
+			pageToken,
 		});
+
+		pagesProcessed += 1;
+		const pageFiles = response.data.files ?? [];
+
+		for (const pageFile of pageFiles) {
+			filesScanned += 1;
+			const snapshot = mapGoogleFile(pageFile);
+			if (!snapshot) {
+				continue;
+			}
+
+			supportedFiles += 1;
+			seenGoogleFileIds.add(snapshot.googleFileId);
+			const existing = existingByGoogleId.get(snapshot.googleFileId);
+
+			const syncResult = await syncSingleFile({
+				connectionId: params.driveConnectionId,
+				userId: params.userId,
+				snapshot,
+				existing,
+				forceReingest: false,
+			});
+			if (syncResult.hasChanged) {
+				ingestQueued += 1;
+			}
+		}
+
+		pageToken = response.data.nextPageToken ?? undefined;
+		if (!pageToken) {
+			break;
+		}
 	}
 
+	let markedDeleted = 0;
 	for (const existing of existingFiles) {
 		if (seenGoogleFileIds.has(existing.googleFileId) || existing.isDeleted) {
 			continue;
@@ -290,6 +300,7 @@ const runFullSync = async (params: {
 			userId: params.userId,
 			driveFileId: existing.id,
 		});
+		markedDeleted += 1;
 	}
 
 	const startPageToken = await params.drive.changes.getStartPageToken({
@@ -304,6 +315,16 @@ const runFullSync = async (params: {
 			status: "CONNECTED",
 		},
 	});
+
+	console.log("[drive.sync] full sync complete", {
+		userId: params.userId,
+		driveConnectionId: params.driveConnectionId,
+		pagesProcessed,
+		filesScanned,
+		supportedFiles,
+		ingestQueued,
+		markedDeleted,
+	});
 };
 
 const runIncrementalSync = async (params: {
@@ -312,6 +333,11 @@ const runIncrementalSync = async (params: {
 	driveConnectionId: string;
 	syncCursor: string;
 }) => {
+	console.log("[drive.sync] starting incremental sync", {
+		userId: params.userId,
+		driveConnectionId: params.driveConnectionId,
+	});
+
 	const existingFiles = await prisma.driveFile.findMany({
 		where: {
 			userId: params.userId,
@@ -331,6 +357,12 @@ const runIncrementalSync = async (params: {
 
 	let pageToken: string | undefined = params.syncCursor;
 	let newStartPageToken: string | null = null;
+	let pagesProcessed = 0;
+	let changesProcessed = 0;
+	let removedCount = 0;
+	let unsupportedCount = 0;
+	let upsertedFiles = 0;
+	let ingestQueued = 0;
 
 	while (pageToken) {
 		const response: any = await params.drive.changes.list({
@@ -341,10 +373,12 @@ const runIncrementalSync = async (params: {
 			fields:
 				"nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,modifiedTime,md5Checksum,webViewLink,trashed))",
 		});
+		pagesProcessed += 1;
 
 		const changes = response.data.changes ?? [];
 
 		for (const change of changes) {
+			changesProcessed += 1;
 			const googleFileId = change.fileId;
 			if (!googleFileId) {
 				continue;
@@ -360,6 +394,7 @@ const runIncrementalSync = async (params: {
 						driveFileId: existing.id,
 						deletedAtGoogle: toDate(change.file?.modifiedTime),
 					});
+					removedCount += 1;
 				}
 				continue;
 			}
@@ -370,23 +405,29 @@ const runIncrementalSync = async (params: {
 
 			const snapshot = mapGoogleFile(change.file);
 			if (!snapshot) {
+				unsupportedCount += 1;
 				if (existing && !existing.isDeleted) {
 					await markDeleted({
 						userId: params.userId,
 						driveFileId: existing.id,
 						deletedAtGoogle: toDate(change.file.modifiedTime),
 					});
+					removedCount += 1;
 				}
 				continue;
 			}
 
-			await syncSingleFile({
+			const syncResult = await syncSingleFile({
 				connectionId: params.driveConnectionId,
 				userId: params.userId,
 				snapshot,
 				existing,
 				forceReingest: false,
 			});
+			upsertedFiles += 1;
+			if (syncResult.hasChanged) {
+				ingestQueued += 1;
+			}
 		}
 
 		pageToken = response.data.nextPageToken ?? undefined;
@@ -403,6 +444,17 @@ const runIncrementalSync = async (params: {
 			status: "CONNECTED",
 		},
 	});
+
+	console.log("[drive.sync] incremental sync complete", {
+		userId: params.userId,
+		driveConnectionId: params.driveConnectionId,
+		pagesProcessed,
+		changesProcessed,
+		removedCount,
+		unsupportedCount,
+		upsertedFiles,
+		ingestQueued,
+	});
 };
 
 export const runDriveSync = async ({
@@ -410,6 +462,12 @@ export const runDriveSync = async ({
 	userId,
 	forceFullSync = false,
 }: DriveSyncParams): Promise<void> => {
+	console.log("[drive.sync] dispatch", {
+		userId,
+		driveConnectionId,
+		forceFullSync,
+	});
+
 	const { drive, connection } = await getAuthorizedDriveClient({
 		connectionId: driveConnectionId,
 		userId,
@@ -419,9 +477,12 @@ export const runDriveSync = async ({
 		throw new ApiError(400, "CONNECTION_REVOKED", "Drive connection has been revoked");
 	}
 
-	const shouldRunFullSync = forceFullSync || !connection.syncCursor;
+	const mode = resolveDriveSyncMode({
+		forceFullSync,
+		syncCursor: connection.syncCursor,
+	});
 
-	if (shouldRunFullSync) {
+	if (mode === "full") {
 		await runFullSync({
 			drive,
 			userId,
@@ -461,6 +522,17 @@ export const runDriveSync = async ({
 		throw error;
 	}
 };
+
+export function resolveDriveSyncMode(params: {
+	forceFullSync: boolean;
+	syncCursor: string | null | undefined;
+}): "full" | "incremental" {
+	if (params.forceFullSync || !params.syncCursor) {
+		return "full";
+	}
+
+	return "incremental";
+}
 
 export const queueMetadata = {
 	jobName: FULL_SYNC_JOB_NAME,

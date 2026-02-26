@@ -54,12 +54,46 @@ const parseWithSchema = <T>(schema: z.ZodSchema<T>, input: unknown, label: strin
 	return parsed.data;
 };
 
+const preprocessObserverPayload = (input: unknown): unknown => {
+	if (typeof input !== "object" || !input) {
+		return input;
+	}
+
+	const obj = input as Record<string, unknown>;
+	if (!Array.isArray(obj.nextSteps)) {
+		return input;
+	}
+
+	const sanitized = obj.nextSteps
+		.map((item: unknown) => {
+			// LLM sometimes returns strings instead of step objects — drop them
+			if (typeof item === "string" || typeof item !== "object" || !item) {
+				return null;
+			}
+			const step = item as Record<string, unknown>;
+			// Fill missing description
+			if (!step.description || typeof step.description !== "string") {
+				const toolHint = typeof step.toolName === "string" ? `Run ${step.toolName}` : "Execute step";
+				step.description = toolHint;
+			}
+			// Ensure toolInput is present
+			if (!step.toolInput || typeof step.toolInput !== "object") {
+				step.toolInput = {};
+			}
+			return step;
+		})
+		.filter(Boolean);
+
+	return { ...obj, nextSteps: sanitized };
+};
+
 export const parsePlannerOutput = (input: unknown): PlannerOutput => {
 	return parseWithSchema(plannerSchema, input, "Planner");
 };
 
 export const parseObserverOutput = (input: unknown): ObserverOutput => {
-	const parsed = parseWithSchema(observerSchema, input, "Observer");
+	const preprocessed = preprocessObserverPayload(input);
+	const parsed = parseWithSchema(observerSchema, preprocessed, "Observer");
 	if (parsed.action !== "replan") {
 		return {
 			...parsed,

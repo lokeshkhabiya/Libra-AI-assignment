@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Loader2, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowUp, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import { useChatStore } from "@/lib/chat-store";
 import { useDriveStore } from "@/lib/drive-store";
 
 const GOOGLE_DRIVE_ICON = (
-	<svg width="16" height="16" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+	<svg width="14" height="14" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
 		<path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da" />
 		<path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-20.4 35.3c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" fill="#00ac47" />
 		<path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.5l5.85 13.5z" fill="#ea4335" />
@@ -75,19 +75,19 @@ export default function ChatInputBar({
 	const isConnected = driveStatus?.connected;
 
 	return (
-		<div className="mx-auto w-full max-w-3xl px-4 pb-4">
+		<div className="mx-auto w-full max-w-2xl px-4 pb-4">
 			{attachedFileIds.length > 0 && (
 				<div className="mb-2 flex flex-wrap gap-1.5">
 					{attachedFileIds.map((fileId) => (
 						<span
 							key={fileId}
-							className="inline-flex items-center gap-1 rounded-sm border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground"
+							className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground"
 						>
 							{attachedFileNames.get(fileId) || fileId.slice(0, 8)}
 							<button
 								type="button"
 								onClick={() => removeAttachedFile(fileId)}
-								className="ml-0.5 hover:text-foreground"
+								className="ml-0.5 rounded-full p-0.5 hover:bg-muted hover:text-foreground transition-colors"
 							>
 								<X className="size-2.5" />
 							</button>
@@ -95,7 +95,7 @@ export default function ChatInputBar({
 					))}
 				</div>
 			)}
-			<div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
+			<div className="flex flex-col gap-2 rounded-2xl border border-border/50 bg-card/80 p-3 shadow-sm transition-shadow focus-within:shadow-md focus-within:border-border">
 				<textarea
 					ref={textareaRef}
 					value={input}
@@ -104,7 +104,7 @@ export default function ChatInputBar({
 					placeholder="Ask anything..."
 					rows={1}
 					disabled={isStreaming || isHydratingTask}
-					className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
+					className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 outline-none disabled:opacity-50"
 				/>
 				<div className="flex items-center justify-between">
 					<div className="flex items-center gap-1.5">
@@ -114,14 +114,15 @@ export default function ChatInputBar({
 							onClick={onOpenFilePicker}
 							disabled={!isConnected}
 							title={isConnected ? "Attach files" : "Connect Google Drive first"}
+							className="rounded-full"
 						>
 							<Plus className="size-4" />
 						</Button>
 						{isConnected && (
 							<>
-								<span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground">
+								<span className="inline-flex items-center gap-1.5 rounded-full border border-border/40 bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground">
 									{GOOGLE_DRIVE_ICON}
-									Google Drive
+									Drive
 								</span>
 								<Button
 									variant="ghost"
@@ -129,6 +130,7 @@ export default function ChatInputBar({
 									onClick={() => void handleSync()}
 									disabled={isSyncing}
 									title="Sync files"
+									className="rounded-full"
 								>
 									{isSyncing ? (
 										<Loader2 className="size-3.5 animate-spin" />
@@ -144,11 +146,12 @@ export default function ChatInputBar({
 						size="icon-sm"
 						onClick={handleSubmit}
 						disabled={!input.trim() || isStreaming || isHydratingTask}
+						className="rounded-full"
 					>
 						{isStreaming || isHydratingTask ? (
 							<Loader2 className="size-4 animate-spin" />
 						) : (
-							<ArrowRight className="size-4" />
+							<ArrowUp className="size-4" />
 						)}
 					</Button>
 				</div>

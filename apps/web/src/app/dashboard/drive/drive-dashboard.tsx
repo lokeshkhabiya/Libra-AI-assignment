@@ -1,19 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCcw } from "lucide-react";
+import { Cloud, CloudOff, FileText, Loader2, RefreshCcw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import DriveConnectButton from "@/components/drive-connect-button";
 import DriveFileList from "@/components/drive-file-list";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import {
 	disconnectDrive,
 	getDriveStatus,
@@ -22,6 +15,7 @@ import {
 	type DriveFileRow,
 	type DriveStatusResponse,
 } from "@/lib/api/drive";
+import { cn } from "@/lib/utils";
 
 const formatDate = (value: string | null): string => {
 	if (!value) {
@@ -36,17 +30,26 @@ const formatDate = (value: string | null): string => {
 	return parsed.toLocaleString();
 };
 
-const STAT_CARD_STYLES = [
-	"border-l-4 border-l-emerald-500",
-	"border-l-4 border-l-amber-500",
-	"border-l-4 border-l-red-500",
-] as const;
+const formatDuration = (durationMs: number): string => {
+	if (durationMs < 60_000) {
+		return `${Math.max(1, Math.round(durationMs / 1000))}s`;
+	}
+
+	const minutes = Math.round(durationMs / 60_000);
+	if (minutes < 60) {
+		return `${minutes}m`;
+	}
+
+	const hours = Math.round(minutes / 60);
+	return `${hours}h`;
+};
 
 export default function DriveDashboard() {
 	const [status, setStatus] = useState<DriveStatusResponse | null>(null);
 	const [files, setFiles] = useState<DriveFileRow[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
-	const [isSyncing, setIsSyncing] = useState(false);
+	const [isIncrementalSyncing, setIsIncrementalSyncing] = useState(false);
+	const [isFullSyncing, setIsFullSyncing] = useState(false);
 	const [isDisconnecting, setIsDisconnecting] = useState(false);
 
 	const loadData = useCallback(async () => {
@@ -81,8 +84,8 @@ export default function DriveDashboard() {
 		}
 	}, []);
 
-	const onSync = async () => {
-		setIsSyncing(true);
+	const onIncrementalSync = async () => {
+		setIsIncrementalSyncing(true);
 		try {
 			const result = await syncDrive(false);
 			if (result.alreadyQueued) {
@@ -94,7 +97,24 @@ export default function DriveDashboard() {
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : "Failed to queue sync");
 		} finally {
-			setIsSyncing(false);
+			setIsIncrementalSyncing(false);
+		}
+	};
+
+	const onFullSync = async () => {
+		setIsFullSyncing(true);
+		try {
+			const result = await syncDrive(true);
+			if (result.alreadyQueued) {
+				toast.message("A sync job is already in progress");
+			} else {
+				toast.success("Full re-sync queued");
+			}
+			await loadData();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Failed to queue full re-sync");
+		} finally {
+			setIsFullSyncing(false);
 		}
 	};
 
@@ -111,30 +131,36 @@ export default function DriveDashboard() {
 		}
 	};
 
-	const statCards = useMemo(() => {
+	const statItems = useMemo(() => {
 		return [
 			{
-				title: "Indexed",
+				label: "Indexed",
 				value: status?.filesIndexed ?? 0,
-				description: "Ready for retrieval",
+				sub: "Ready for retrieval",
+				icon: FileText,
+				color: "text-emerald-500",
 			},
 			{
-				title: "Pending",
+				label: "Pending",
 				value: status?.filesPending ?? 0,
-				description: "Queued for ingestion",
+				sub: "Queued for ingestion",
+				icon: Loader2,
+				color: "text-amber-500",
 			},
 			{
-				title: "Failed",
+				label: "Failed",
 				value: status?.filesFailed ?? 0,
-				description: "Need retry or file fixes",
+				sub: "Need retry",
+				icon: TriangleAlert,
+				color: "text-red-500",
 			},
 		];
 	}, [status]);
 
 	if (isLoading && !status) {
 		return (
-			<div className="container mx-auto max-w-6xl px-4 py-6">
-				<div className="flex items-center gap-2 text-sm text-muted-foreground">
+			<div className="container mx-auto max-w-5xl px-6 py-12">
+				<div className="flex items-center gap-2 text-sm text-muted-foreground animate-fade-in">
 					<Loader2 className="size-4 animate-spin" /> Loading Drive workspace...
 				</div>
 			</div>
@@ -142,62 +168,104 @@ export default function DriveDashboard() {
 	}
 
 	return (
-		<div className="relative overflow-hidden">
-			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,oklch(0.90_0.11_160_/_0.35),transparent_60%)]" />
-			<div className="container relative mx-auto grid max-w-6xl gap-4 px-4 py-6">
-				<Card className="border border-border/70 bg-background/90 backdrop-blur">
-					<CardHeader className="flex-row items-center justify-between gap-4">
+		<div className="container mx-auto max-w-5xl px-6 py-8">
+			{/* Connection header */}
+			<div className="animate-fade-in">
+				<div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+					<div className="flex items-start gap-3">
+						<div className={cn(
+							"mt-0.5 flex size-9 items-center justify-center rounded-xl",
+							status?.connected ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground"
+						)}>
+							{status?.connected ? <Cloud className="size-4" /> : <CloudOff className="size-4" />}
+						</div>
 						<div>
-							<CardTitle className="text-lg tracking-tight">Drive Connector</CardTitle>
-							<CardDescription>
-								Connect your Google Drive and ingest Docs, PDFs, and text files for semantic retrieval.
-							</CardDescription>
+							<h1 className="text-lg font-semibold tracking-tight">Google Drive</h1>
+							<p className="text-sm text-muted-foreground">
+								Connect and ingest Docs, PDFs, and text files for semantic retrieval.
+							</p>
 						</div>
-						<div className="flex items-center gap-2">
-							<Button
-								variant="outline"
-								disabled={!status?.connected || isSyncing}
-								onClick={() => {
-									void onSync();
-								}}
-							>
-								{isSyncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
-								Sync now
-							</Button>
-							<DriveConnectButton
-								connected={Boolean(status?.connected)}
-								busy={isDisconnecting}
-								onDisconnect={onDisconnect}
-							/>
-						</div>
-					</CardHeader>
-					<CardContent className="grid gap-2 border-t border-border/70 pt-4 text-xs text-muted-foreground sm:grid-cols-2">
-						<p>
-							Connection: <span className="font-medium text-foreground">{status?.status ?? "NOT_CONNECTED"}</span>
-						</p>
-						<p>
-							Account: <span className="font-medium text-foreground">{status?.googleAccountEmail ?? "-"}</span>
-						</p>
-						<p>
-							Last sync: <span className="font-medium text-foreground">{formatDate(status?.lastSyncedAt ?? null)}</span>
-						</p>
-					</CardContent>
-				</Card>
-
-				<div className="grid gap-3 md:grid-cols-3">
-					{statCards.map((card, index) => {
-						return (
-							<Card key={card.title} className={STAT_CARD_STYLES[index]}>
-								<CardHeader>
-									<CardDescription>{card.title}</CardDescription>
-									<CardTitle className="text-2xl tabular-nums">{card.value}</CardTitle>
-								</CardHeader>
-								<CardContent className="text-[11px] text-muted-foreground">{card.description}</CardContent>
-							</Card>
-						);
-					})}
+					</div>
+					<div className="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={!status?.connected || isIncrementalSyncing || isFullSyncing}
+							onClick={() => {
+								void onIncrementalSync();
+							}}
+						>
+							{isIncrementalSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />}
+							Sync now
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={!status?.connected || isIncrementalSyncing || isFullSyncing}
+							onClick={() => {
+								void onFullSync();
+							}}
+						>
+							{isFullSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCcw className="size-3.5" />}
+							Full re-sync
+						</Button>
+						<DriveConnectButton
+							connected={Boolean(status?.connected)}
+							busy={isDisconnecting}
+							onDisconnect={onDisconnect}
+						/>
+					</div>
 				</div>
 
+				{/* Connection details */}
+				{status?.connected && (
+					<div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+						<span>
+							Account: <span className="font-medium text-foreground">{status.googleAccountEmail}</span>
+						</span>
+						<span>
+							Last sync: <span className="font-medium text-foreground">{formatDate(status.lastSyncedAt ?? null)}</span>
+						</span>
+						{status.autoSyncEnabled ? (
+							<span>
+								Auto sync:{" "}
+								<span className="font-medium text-foreground">
+									Enabled (every {formatDuration(status.autoSyncIntervalMs)})
+								</span>
+							</span>
+						) : null}
+						{status.syncJobQueued ? (
+							<span>
+								Queue: <span className="font-medium text-foreground">Sync job in progress</span>
+							</span>
+						) : null}
+					</div>
+				)}
+			</div>
+
+			{/* Stats */}
+			<div className="mt-8 grid gap-4 sm:grid-cols-3 animate-fade-in" style={{ animationDelay: "80ms" }}>
+				{statItems.map((item) => {
+					const Icon = item.icon;
+					return (
+						<div
+							key={item.label}
+							className="flex items-center gap-4 rounded-xl border border-border/50 bg-card/50 px-5 py-4"
+						>
+							<div className={cn("flex size-10 items-center justify-center rounded-lg bg-muted/50", item.color)}>
+								<Icon className="size-4" />
+							</div>
+							<div>
+								<p className="text-2xl font-semibold tabular-nums">{item.value}</p>
+								<p className="text-[11px] text-muted-foreground">{item.label}</p>
+							</div>
+						</div>
+					);
+				})}
+			</div>
+
+			{/* File list */}
+			<div className="mt-8 animate-fade-in" style={{ animationDelay: "160ms" }}>
 				<DriveFileList files={files} />
 			</div>
 		</div>

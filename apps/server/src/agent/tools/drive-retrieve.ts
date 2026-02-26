@@ -14,6 +14,8 @@ const inputSchema = z.object({
 });
 
 type ExtractTargetFile = {
+	id: string;
+	userId: string;
 	googleFileId: string;
 	mimeType: string;
 	name: string;
@@ -51,30 +53,6 @@ const responseDataToText = async (data: unknown): Promise<string> => {
 	return "";
 };
 
-const responseDataToBuffer = async (data: unknown): Promise<Buffer> => {
-	if (Buffer.isBuffer(data)) {
-		return data;
-	}
-
-	if (data instanceof ArrayBuffer) {
-		return Buffer.from(data);
-	}
-
-	if (typeof data === "string") {
-		return Buffer.from(data, "utf8");
-	}
-
-	if (isReadableStreamLike(data)) {
-		const chunks: Buffer[] = [];
-		for await (const chunk of data) {
-			chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-		}
-		return Buffer.concat(chunks);
-	}
-
-	return Buffer.alloc(0);
-};
-
 const extractGoogleDocText = async (drive: any, fileId: string): Promise<string> => {
 	const response = await drive.files.export(
 		{
@@ -89,25 +67,18 @@ const extractGoogleDocText = async (drive: any, fileId: string): Promise<string>
 	return responseDataToText(response.data);
 };
 
-const extractPdfText = async (drive: any, fileId: string): Promise<string> => {
-	const response = await drive.files.get(
-		{
-			fileId,
-			alt: "media",
-		},
-		{
-			responseType: "arraybuffer",
-		},
-	);
+const extractPdfTextFromDb = async (driveFileId: string, userId: string): Promise<string> => {
+	const chunks = await prisma.driveChunk.findMany({
+		where: { driveFileId, userId },
+		orderBy: { chunkIndex: "asc" },
+		select: { content: true },
+	});
 
-	const buffer = await responseDataToBuffer(response.data);
-	const pdfParseModule = await import("pdf-parse");
-	const pdfParse = (
-		"default" in pdfParseModule ? pdfParseModule.default : pdfParseModule
-	) as (dataBuffer: Buffer) => Promise<{ text?: string }>;
-	const parsed = await pdfParse(buffer);
+	if (chunks.length === 0) {
+		throw new Error("No indexed content found for this PDF. Try re-indexing the file.");
+	}
 
-	return parsed.text ?? "";
+	return chunks.map((c) => c.content).join("\n\n");
 };
 
 const extractTextFile = async (drive: any, fileId: string): Promise<string> => {
@@ -130,7 +101,7 @@ const extractDriveFileText = async (drive: any, file: ExtractTargetFile): Promis
 	}
 
 	if (file.mimeType === PDF_MIME) {
-		return extractPdfText(drive, file.googleFileId);
+		return extractPdfTextFromDb(file.id, file.userId);
 	}
 
 	if (TEXT_MIMES.has(file.mimeType)) {
@@ -212,6 +183,8 @@ export const driveRetrieveTool: ToolDefinition = {
 			});
 
 			const rawContent = await extractDriveFileText(drive, {
+				id: driveFile.id,
+				userId: driveFile.userId,
 				googleFileId: driveFile.googleFileId,
 				mimeType: driveFile.mimeType,
 				name: driveFile.name,

@@ -14,16 +14,18 @@ import {
 	type TaskStreamEvent,
 } from "@/lib/api/agent";
 
-export type ChatMessage = {
-	id: string;
-	role: "user" | "assistant";
-	content: string;
-	taskId?: string;
-	citations?: TaskCitation[];
-	status: "pending" | "streaming" | "complete" | "error";
-	steps?: StepEvent[];
-	attachedFileIds?: string[];
-	attachedFileLabels?: string[];
+export type PlannedStep = {
+	planIndex: number;
+	toolName: string | null;
+	description: string;
+	status: "pending" | "running" | "complete" | "failed";
+};
+
+export type ObserveEntry = {
+	planStepIndex: number;
+	action: "continue" | "replan" | "finalize";
+	reasoning: string;
+	appendedSteps: number;
 };
 
 export type StepEvent = {
@@ -35,6 +37,20 @@ export type StepEvent = {
 	summary?: string;
 	input?: unknown;
 	output?: unknown;
+};
+
+export type ChatMessage = {
+	id: string;
+	role: "user" | "assistant";
+	content: string;
+	taskId?: string;
+	citations?: TaskCitation[];
+	status: "pending" | "streaming" | "complete" | "error";
+	plannedSteps?: PlannedStep[];
+	steps?: StepEvent[];
+	observeLog?: ObserveEntry[];
+	attachedFileIds?: string[];
+	attachedFileLabels?: string[];
 };
 
 type ChatStoreState = {
@@ -119,7 +135,7 @@ const toStepDescription = (step: TaskStep): string => {
 
 const toStepEvents = (steps: TaskStep[]): StepEvent[] => {
 	return steps
-		.filter((step) => step.kind !== "PLAN")
+		.filter((step) => step.kind === "TOOL" || step.kind === "FINALIZE")
 		.map((step) => ({
 			stepNumber: step.stepNumber,
 			kind: step.kind,
@@ -130,6 +146,42 @@ const toStepEvents = (steps: TaskStep[]): StepEvent[] => {
 			input: step.input,
 			output: step.output,
 		}));
+};
+
+const toPlannedStepsFromTaskSteps = (steps: TaskStep[]): PlannedStep[] => {
+	// Reconstruct planned steps from TOOL steps in a completed task
+	// Use a short description — the full summary belongs in the execution log, not the plan
+	return steps
+		.filter((step) => step.kind === "TOOL")
+		.map((step, index) => {
+			const raw = step.summary ?? toStepDescription(step);
+			// Truncate to first sentence or 120 chars for a clean plan view
+			const firstSentence = raw.split(/[.!?]\s/)[0] ?? raw;
+			const description = firstSentence.length > 120
+				? `${firstSentence.slice(0, 117)}...`
+				: firstSentence;
+			return {
+				planIndex: index,
+				toolName: normalizeToolName(step.toolName),
+				description,
+				status: toStepStatus(step.status),
+			};
+		});
+};
+
+const toObserveLogFromTaskSteps = (steps: TaskStep[]): ObserveEntry[] => {
+	// Reconstruct observe log from OBSERVE steps in a completed task
+	return steps
+		.filter((step) => step.kind === "OBSERVE")
+		.map((step, index) => {
+			const output = step.output as Record<string, unknown> | null | undefined;
+			return {
+				planStepIndex: index,
+				action: (output?.action as ObserveEntry["action"]) ?? "continue",
+				reasoning: step.summary ?? "",
+				appendedSteps: 0,
+			};
+		});
 };
 
 const toTaskListItem = (task: TaskDetail): TaskListItem => {
@@ -159,58 +211,6 @@ const upsertTaskListItem = (
 	});
 };
 
-type TaskListItemPatch = Partial<Omit<TaskListItem, "id">>;
-
-const patchTaskListItem = (
-	items: TaskListItem[],
-	taskId: string,
-	patch: TaskListItemPatch | ((item: TaskListItem) => TaskListItemPatch),
-): TaskListItem[] => {
-	let didPatch = false;
-	const now = new Date().toISOString();
-
-	const nextItems = items.map((item) => {
-		if (item.id !== taskId) {
-			return item;
-		}
-
-		didPatch = true;
-		const resolvedPatch = typeof patch === "function" ? patch(item) : patch;
-		return {
-			...item,
-			...resolvedPatch,
-			updatedAt: resolvedPatch.updatedAt ?? now,
-		};
-	});
-
-	return didPatch ? nextItems : items;
-};
-
-const parseTaskStatus = (value: unknown): TaskStatus | null => {
-	if (
-		value === "QUEUED" ||
-		value === "RUNNING" ||
-		value === "COMPLETED" ||
-		value === "FAILED" ||
-		value === "CANCELED"
-	) {
-		return value;
-	}
-	return null;
-};
-
-const parseIsoStringOrNull = (
-	value: unknown,
-): string | null | undefined => {
-	if (typeof value === "string") {
-		return value;
-	}
-	if (value === null) {
-		return null;
-	}
-	return undefined;
-};
-
 const toMessagesFromTask = (task: TaskDetail): ChatMessage[] => {
 	const assistantStatus = toAssistantMessageStatus(task.status);
 	const citations =
@@ -237,13 +237,15 @@ const toMessagesFromTask = (task: TaskDetail): ChatMessage[] => {
 			taskId: task.id,
 			content: assistantContent,
 			status: assistantStatus,
+			plannedSteps: toPlannedStepsFromTaskSteps(task.steps),
 			steps: toStepEvents(task.steps),
+			observeLog: toObserveLogFromTaskSteps(task.steps),
 			citations,
 		},
 	];
 };
 
-const parsePlanSteps = (payload: unknown): StepEvent[] => {
+const parsePlanSteps = (payload: unknown): PlannedStep[] => {
 	if (!Array.isArray(payload)) {
 		return [];
 	}
@@ -258,13 +260,27 @@ const parsePlanSteps = (payload: unknown): StepEvent[] => {
 			typeof step.toolName === "string" ? step.toolName.toLowerCase() : null;
 
 		return {
-			stepNumber: index + 1,
-			kind: "TOOL" as const,
+			planIndex: index,
 			toolName,
 			description,
 			status: "pending" as const,
 		};
 	});
+};
+
+const updatePlannedStepStatus = (
+	plannedSteps: PlannedStep[] | undefined,
+	planIndex: number,
+	status: PlannedStep["status"],
+): PlannedStep[] => {
+	const current = plannedSteps ?? [];
+	const next = [...current];
+	if (planIndex >= 0 && planIndex < next.length) {
+		next[planIndex] = { ...next[planIndex], status };
+	} else {
+		// Appended step (from replan) — it won't be in the list, that's fine
+	}
+	return next;
 };
 
 const upsertStreamingStep = (
@@ -355,7 +371,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 							assistantMessageId,
 							(message) => ({
 								...message,
-								steps: plannedSteps,
+								plannedSteps,
+								steps: [],
+								observeLog: [],
 							}),
 						),
 					}));
@@ -368,6 +386,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 					if (!stepNumber) {
 						return;
 					}
+					const planStepIndex =
+						typeof event.planStepIndex === "number" ? event.planStepIndex : -1;
 
 					set((state) => ({
 						messages: setAssistantMessage(
@@ -375,6 +395,11 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 							assistantMessageId,
 							(message) => ({
 								...message,
+								plannedSteps: updatePlannedStepStatus(
+									message.plannedSteps,
+									planStepIndex,
+									"running",
+								),
 								steps: upsertStreamingStep(message.steps, {
 									stepNumber,
 									kind: "TOOL",
@@ -400,6 +425,8 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 					if (!stepNumber) {
 						return;
 					}
+					const planStepIndex =
+						typeof event.planStepIndex === "number" ? event.planStepIndex : -1;
 					const success = Boolean(event.success);
 					const summary =
 						typeof event.summary === "string" ? event.summary : undefined;
@@ -410,6 +437,11 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 							assistantMessageId,
 							(message) => ({
 								...message,
+								plannedSteps: updatePlannedStepStatus(
+									message.plannedSteps,
+									planStepIndex,
+									success ? "complete" : "failed",
+								),
 								steps: markStepComplete(message.steps, {
 									stepNumber,
 									success,
@@ -418,6 +450,60 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 							}),
 						),
 					}));
+					return;
+				}
+
+				if (type === "observe") {
+					const action = event.action as ObserveEntry["action"] | undefined;
+					const reasoning =
+						typeof event.reasoning === "string" ? event.reasoning : "";
+					const appendedSteps =
+						typeof event.appendedSteps === "number" ? event.appendedSteps : 0;
+
+					// Derive planStepIndex from current steps completed count
+					set((state) => {
+						const msg = state.messages.find((m) => m.id === assistantMessageId);
+						const currentPlanStepIndex = msg
+							? (msg.observeLog?.length ?? 0)
+							: 0;
+
+						return {
+							messages: setAssistantMessage(
+								state.messages,
+								assistantMessageId,
+								(message) => {
+									// If replanning, append new planned steps
+									const newPlannedSteps =
+										appendedSteps > 0 && action === "replan"
+											? [
+												...(message.plannedSteps ?? []),
+												...Array.from({ length: appendedSteps }, (_, i) => ({
+													planIndex:
+														(message.plannedSteps?.length ?? 0) + i,
+													toolName: null,
+													description: `Additional step ${i + 1}`,
+													status: "pending" as const,
+												})),
+											]
+											: message.plannedSteps;
+
+									return {
+										...message,
+										plannedSteps: newPlannedSteps,
+										observeLog: [
+											...(message.observeLog ?? []),
+											{
+												planStepIndex: currentPlanStepIndex,
+												action: action ?? "continue",
+												reasoning,
+												appendedSteps,
+											},
+										],
+									};
+								},
+							),
+						};
+					});
 					return;
 				}
 
@@ -435,12 +521,29 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 						messages: setAssistantMessage(
 							state.messages,
 							assistantMessageId,
-							(message) => ({
-								...message,
-								content: answerMarkdown,
-								citations,
-								status: "complete",
-							}),
+							(message) => {
+								// If plan was missed (race condition), reconstruct from executed steps
+								const plannedSteps =
+									(message.plannedSteps?.length ?? 0) === 0 &&
+									(message.steps?.length ?? 0) > 0
+										? (message.steps ?? [])
+												.filter((s) => s.kind === "TOOL")
+												.map((s, i) => ({
+													planIndex: i,
+													toolName: s.toolName,
+													description: s.summary ?? s.description,
+													status: s.status,
+												}))
+										: message.plannedSteps;
+
+								return {
+									...message,
+									content: answerMarkdown,
+									citations,
+									status: "complete",
+									plannedSteps,
+								};
+							},
 						),
 						isStreaming: false,
 					}));
@@ -492,7 +595,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 										content: fallbackAssistant.content,
 										status: fallbackAssistant.status,
 										citations: fallbackAssistant.citations,
+										plannedSteps: fallbackAssistant.plannedSteps,
 										steps: fallbackAssistant.steps,
+										observeLog: fallbackAssistant.observeLog,
 									};
 								},
 							),
@@ -626,7 +731,9 @@ export const useChatStore = create<ChatStoreState>((set, get) => {
 				role: "assistant",
 				content: "",
 				status: "streaming",
+				plannedSteps: [],
 				steps: [],
+				observeLog: [],
 			};
 
 			set({

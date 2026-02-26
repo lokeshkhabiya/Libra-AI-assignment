@@ -1,20 +1,13 @@
 "use client";
 
 import type { DriveFileRow } from "@/lib/api/drive";
+import { cn } from "@/lib/utils";
 
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
-
-const statusClassName: Record<DriveFileRow["indexStatus"], string> = {
-	PENDING: "bg-amber-100 text-amber-900",
-	INDEXED: "bg-emerald-100 text-emerald-900",
-	FAILED: "bg-red-100 text-red-900",
-	SKIPPED: "bg-zinc-200 text-zinc-800",
+const statusStyle: Record<DriveFileRow["indexStatus"], string> = {
+	PENDING: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+	INDEXED: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+	FAILED: "bg-red-500/10 text-red-600 dark:text-red-400",
+	SKIPPED: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
 };
 
 const formatDate = (value: string | null): string => {
@@ -33,69 +26,71 @@ const formatDate = (value: string | null): string => {
 export default function DriveFileList({ files }: { files: DriveFileRow[] }) {
 	if (files.length === 0) {
 		return (
-			<Card>
-				<CardHeader>
-					<CardTitle>No indexed files yet</CardTitle>
-					<CardDescription>
-						Connect Drive and trigger sync to ingest Docs, PDFs, and text files.
-					</CardDescription>
-				</CardHeader>
-			</Card>
+			<div className="rounded-xl border border-dashed border-border/50 px-6 py-10 text-center">
+				<p className="text-sm font-medium text-foreground/70">No indexed files yet</p>
+				<p className="mt-1 text-xs text-muted-foreground">
+					Connect Drive and trigger sync to ingest Docs, PDFs, and text files.
+				</p>
+			</div>
 		);
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>Indexed Files</CardTitle>
-				<CardDescription>
-					Latest Drive files and ingestion state in your personal vector namespace.
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div className="overflow-x-auto">
-					<table className="min-w-full border-collapse text-left text-xs">
+		<div>
+			<h2 className="mb-3 text-sm font-semibold tracking-tight">Indexed Files</h2>
+			<div className="overflow-hidden rounded-xl border border-border/50">
+				<div className="max-h-[400px] overflow-x-auto overflow-y-auto">
+					<table className="min-w-full text-left text-xs">
 						<thead>
-							<tr className="border-b border-border/80 text-muted-foreground">
-								<th className="px-2 py-2 font-medium">File</th>
-								<th className="px-2 py-2 font-medium">Status</th>
-								<th className="px-2 py-2 font-medium">Chunks</th>
-								<th className="px-2 py-2 font-medium">Updated</th>
+							<tr className="border-b border-border/50 bg-muted/30">
+								<th className="px-4 py-2.5 font-medium text-muted-foreground">File</th>
+								<th className="px-4 py-2.5 font-medium text-muted-foreground">Status</th>
+								<th className="px-4 py-2.5 font-medium text-muted-foreground">Chunks</th>
+								<th className="px-4 py-2.5 font-medium text-muted-foreground">Updated</th>
 							</tr>
 						</thead>
 						<tbody>
-							{files.map((file) => {
+							{files.map((file, index) => {
 								return (
-									<tr key={file.id} className="border-b border-border/60">
-										<td className="px-2 py-2 align-top">
+									<tr
+										key={file.id}
+										className={cn(
+											"border-b border-border/30 transition-colors hover:bg-muted/20",
+											index === files.length - 1 && "border-b-0"
+										)}
+									>
+										<td className="px-4 py-3 align-top">
 											<div className="max-w-[26rem]">
 												{file.webViewLink ? (
 													<a
 														href={file.webViewLink}
 														target="_blank"
 														rel="noreferrer"
-														className="font-medium underline decoration-dotted underline-offset-2"
+														className="font-medium text-foreground hover:text-primary transition-colors"
 													>
 														{file.name}
 													</a>
 												) : (
 													<p className="font-medium">{file.name}</p>
 												)}
-												<p className="mt-1 text-muted-foreground">{file.mimeType}</p>
+												<p className="mt-0.5 text-[11px] text-muted-foreground">{file.mimeType}</p>
 												{file.indexError ? (
-													<p className="mt-1 text-destructive">{file.indexError}</p>
+													<p className="mt-0.5 text-[11px] text-destructive">{file.indexError}</p>
 												) : null}
 											</div>
 										</td>
-										<td className="px-2 py-2 align-top">
+										<td className="px-4 py-3 align-top">
 											<span
-												className={`inline-flex rounded-none px-2 py-1 text-[10px] font-semibold ${statusClassName[file.indexStatus]}`}
+												className={cn(
+													"inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium",
+													statusStyle[file.indexStatus],
+												)}
 											>
 												{file.indexStatus}
 											</span>
 										</td>
-										<td className="px-2 py-2 align-top">{file.chunkCount}</td>
-										<td className="px-2 py-2 align-top text-muted-foreground">
+										<td className="px-4 py-3 align-top tabular-nums">{file.chunkCount}</td>
+										<td className="px-4 py-3 align-top text-muted-foreground">
 											{formatDate(file.updatedAt)}
 										</td>
 									</tr>
@@ -104,7 +99,7 @@ export default function DriveFileList({ files }: { files: DriveFileRow[] }) {
 						</tbody>
 					</table>
 				</div>
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 }

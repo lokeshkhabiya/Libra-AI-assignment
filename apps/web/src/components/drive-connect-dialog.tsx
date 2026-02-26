@@ -23,11 +23,13 @@ export default function DriveConnectDialog({
 		<Dialog open={open}>
 			<DialogContent showCloseButton={false} className="sm:max-w-md">
 				<DialogHeader>
-					<div className="flex items-center gap-2">
-						<HardDrive className="size-5 text-muted-foreground" />
+					<div className="flex items-center gap-2.5">
+						<div className="flex size-9 items-center justify-center rounded-xl bg-primary/10">
+							<HardDrive className="size-4 text-primary" />
+						</div>
 						<DialogTitle>Connect Google Drive</DialogTitle>
 					</div>
-					<DialogDescription>
+					<DialogDescription className="pt-1">
 						Connect your Google Drive to search and reference your documents, PDFs, and
 						text files when asking questions.
 					</DialogDescription>

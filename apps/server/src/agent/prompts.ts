@@ -34,7 +34,11 @@ export const buildPlannerSystemPrompt = (tools: PromptTool[]): string => {
 		"Return strictly valid JSON with this shape:",
 		`{"steps":[{"description":"...", "toolName":"...", "toolInput":{}}]}`,
 		"Rules:",
-		"- Choose between 1 and maxSteps steps.",
+		"- Use the MINIMUM number of steps truly needed to answer the query. maxSteps is a hard ceiling, NOT a target.",
+		"- Simple queries (single doc lookup, direct fact): 1-3 steps.",
+		"- Moderate research (multi-source, comparison): 3-5 steps.",
+		"- Complex multi-source analysis: 5-7 steps.",
+		"- NEVER pad with redundant steps. Stop planning the moment you have a path to a confident answer.",
 		"- Use only the provided tool names.",
 		"- Keep each step action-oriented and specific.",
 		"- Make toolInput minimal and valid for the target tool schema.",
@@ -53,8 +57,8 @@ export const buildPlannerUserPrompt = (params: {
 }): string => {
 	const sections = [
 		`Task: ${params.taskPrompt}`,
-		`Maximum steps: ${params.maxSteps}`,
-		"Produce the best plan now.",
+		`Hard step limit: ${params.maxSteps} (use far fewer — plan only what is truly needed to answer the query).`,
+		"Produce the most efficient plan now.",
 	];
 
 	if (params.indexedDriveFiles && params.indexedDriveFiles.length > 0) {
@@ -108,7 +112,15 @@ export const buildFinalizerSystemPrompt = (): string => {
 		`{"summary":"...", "answerMarkdown":"...", "confidence":"low|medium|high", "citations":[{"sourceType":"WEB|DRIVE","title":"...","sourceUrl":"...","excerpt":"...","driveFileId":"...","rank":1,"score":0.9,"metadata":{}}]}`,
 		"Rules:",
 		"- summary should be concise and factual.",
-		"- answerMarkdown should be the full answer.",
+		"- answerMarkdown should be the full, well-structured answer using proper Markdown formatting.",
+		"- Use ## headings to organize sections. Use ### for sub-sections when needed.",
+		"- Use **bold** for key terms and emphasis. Use bullet points or numbered lists for multiple items.",
+		"- Use `inline code` for technical terms, file names, or short values.",
+		"- Use fenced code blocks (```language) for any code snippets, commands, or structured data.",
+		"- Use > blockquotes for important callouts or direct quotes from sources.",
+		"- Use tables (| col1 | col2 |) when comparing items or presenting structured data.",
+		"- Use --- horizontal rules to separate major topic shifts.",
+		"- Write in clear, concise paragraphs. Avoid walls of text.",
 		"- citations should map to actual evidence only.",
 		"- keep metadata flat key/value when present.",
 	].join("\n");

@@ -313,6 +313,7 @@ export const runAgentTask = async (
 
 	let stepNumber = 1;
 	let stepsCompleted = 0;
+	let planStepIndex = 0;
 
 	const pendingPlanSteps: AgentPlanStep[] = [];
 	const recentSummaries: string[] = [];
@@ -412,6 +413,7 @@ export const runAgentTask = async (
 				});
 
 				stepsCompleted += 1;
+				planStepIndex += 1;
 				await prisma.agentTask.update({
 					where: { id: task.id },
 					data: {
@@ -446,6 +448,7 @@ export const runAgentTask = async (
 				taskId: task.id,
 				stepId: runningStep.id,
 				stepNumber: runningStep.stepNumber,
+				planStepIndex,
 				toolName: currentStep.toolName,
 				description: currentStep.description,
 			});
@@ -473,6 +476,22 @@ export const runAgentTask = async (
 			const toolSummary = toStepSummary(currentStep, toolResult);
 			const stepStatus = toolResult.success ? "COMPLETED" : "FAILED";
 
+			let failureReason: string | undefined;
+			if (!toolResult.success) {
+				const data = toolResult.data;
+
+				if (
+					data &&
+					typeof data === "object" &&
+					"error" in data &&
+					typeof (data as { error?: unknown }).error === "string"
+				) {
+					failureReason = safeErrorMessage((data as { error?: string }).error ?? "");
+				} else {
+					failureReason = truncate(stringifyForPrompt(data), 500);
+				}
+			}
+
 			log.info("agent:tool:done", {
 				toolName: currentStep.toolName,
 				stepNumber: runningStep.stepNumber,
@@ -480,6 +499,7 @@ export const runAgentTask = async (
 				durationMs: toolDurationMs,
 				citationCount: toolResult.citations?.length ?? 0,
 				truncated: toolResult.truncated ?? false,
+				...(failureReason ? { failureReason } : {}),
 			});
 			await prisma.agentStep.update({
 				where: {
@@ -506,10 +526,13 @@ export const runAgentTask = async (
 				taskId: task.id,
 				stepId: runningStep.id,
 				stepNumber: runningStep.stepNumber,
+				planStepIndex,
 				toolName: currentStep.toolName,
 				success: toolResult.success,
 				summary: toolSummary,
 			});
+
+			planStepIndex += 1;
 
 			recentSummaries.push(truncate(toolSummary, 1000));
 			if (recentSummaries.length > RECENT_SUMMARY_WINDOW) {

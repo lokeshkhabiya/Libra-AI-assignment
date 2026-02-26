@@ -8,6 +8,9 @@ export type DriveStatusResponse = {
 	filesIndexed: number;
 	filesPending: number;
 	filesFailed: number;
+	syncJobQueued: boolean;
+	autoSyncEnabled: boolean;
+	autoSyncIntervalMs: number;
 };
 
 export type DriveFileRow = {
@@ -30,6 +33,26 @@ export type DriveFilesResponse = {
 	pageSize: number;
 	total: number;
 	items: DriveFileRow[];
+};
+
+export type DrivePickerTokenResponse = {
+	accessToken: string;
+};
+
+export type DrivePickerSelectResponse = {
+	attachedFiles: Array<{
+		driveFileId: string;
+		googleFileId: string;
+		name: string;
+		mimeType: string;
+		indexStatus: "PENDING" | "INDEXED" | "FAILED" | "SKIPPED";
+		alreadyIndexed: boolean;
+	}>;
+	rejectedFiles: Array<{
+		googleFileId: string;
+		reason: string;
+	}>;
+	queuedCount: number;
 };
 
 const SERVER_URL = env.NEXT_PUBLIC_SERVER_URL;
@@ -121,5 +144,20 @@ export const getDriveFileContentUrl = (fileId: string): string => {
 export const disconnectDrive = async (): Promise<void> => {
 	await apiFetch<void>("/api/drive/disconnect", {
 		method: "DELETE",
+	});
+};
+
+export const getDrivePickerToken = async (): Promise<DrivePickerTokenResponse> => {
+	return apiFetch<DrivePickerTokenResponse>("/api/drive/picker-token", {
+		method: "GET",
+	});
+};
+
+export const pickerSelectDriveFiles = async (
+	googleFileIds: string[],
+): Promise<DrivePickerSelectResponse> => {
+	return apiFetch<DrivePickerSelectResponse>("/api/drive/picker-select", {
+		method: "POST",
+		body: JSON.stringify({ googleFileIds }),
 	});
 };

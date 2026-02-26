@@ -50,6 +50,7 @@ export const ingestDriveFile = async ({
 	userId,
 	forceReingest = false,
 }: DriveIngestParams): Promise<void> => {
+	const startedAt = Date.now();
 	const { drive, driveFile } = await getDriveClientForFile({
 		driveFileId,
 		userId,
@@ -209,9 +210,18 @@ export const ingestDriveFile = async ({
 			}),
 		]);
 
-		console.log("[ingest] done", { ...logCtx, chunkCount: chunks.length, indexMode });
+		console.log("[ingest] done", {
+			...logCtx,
+			chunkCount: chunks.length,
+			indexMode,
+			durationMs: Date.now() - startedAt,
+		});
 	} catch (error) {
-		console.error("[ingest] failed", { ...logCtx, error: error instanceof Error ? error.message : String(error) });
+		console.error("[ingest] failed", {
+			...logCtx,
+			error: error instanceof Error ? error.message : String(error),
+			durationMs: Date.now() - startedAt,
+		});
 		await prisma.driveFile.update({
 			where: { id: driveFile.id },
 			data: {

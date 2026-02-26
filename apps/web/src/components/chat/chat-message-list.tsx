@@ -20,36 +20,27 @@ export default function ChatMessageList() {
 
 	if (isHydratingTask && activeTaskId) {
 		return (
-			<div className="flex flex-1 items-center justify-center">
-				<div className="flex items-center gap-2 text-xs text-muted-foreground">
-					<Loader2 className="size-3.5 animate-spin" />
-					Loading task
+			<div className="flex flex-1 min-h-0 items-center justify-center">
+				<div className="flex items-center gap-2.5 text-xs text-muted-foreground animate-fade-in">
+					<Loader2 className="size-4 animate-spin" />
+					Loading task...
 				</div>
 			</div>
 		);
 	}
 
-	if (messages.length === 0) {
-		return (
-			<div className="flex flex-1 flex-col items-center justify-center">
-				<h2 className="text-xl font-semibold tracking-tight text-foreground/80 md:text-2xl">
-					Start A New Task
-				</h2>
-				<p className="mt-2 text-sm text-muted-foreground">
-					Ask anything about your documents and external sources.
-				</p>
-			</div>
-		);
-	}
-
 	return (
-		<div className="flex flex-1 flex-col overflow-y-auto px-4 py-6">
-			<div className="mx-auto w-full max-w-3xl space-y-6">
-				{messages.map((message) =>
+		<div className="flex flex-1 min-h-0 flex-col overflow-y-auto px-4 py-8">
+			<div className="mx-auto w-full max-w-3xl space-y-8">
+				{messages.map((message, index) =>
 					message.role === "user" ? (
-						<UserMessage key={message.id} message={message} />
+						<div key={message.id} className="animate-fade-in" style={{ animationDelay: `${index * 40}ms` }}>
+							<UserMessage message={message} />
+						</div>
 					) : (
-						<AssistantMessage key={message.id} message={message} />
+						<div key={message.id} className="animate-fade-in" style={{ animationDelay: `${index * 40}ms` }}>
+							<AssistantMessage message={message} />
+						</div>
 					),
 				)}
 				<div ref={bottomRef} />

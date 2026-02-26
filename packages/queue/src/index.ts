@@ -68,6 +68,64 @@ export const driveIngestQueue = new Queue<DriveIngestJobData, void, DriveIngestJ
 	sharedQueueOptions,
 );
 
+const DRIVE_SYNC_JOB_STATES = ["waiting", "active", "delayed", "prioritized"] as const;
+
+export const selectQueuedDriveSyncJob = (
+	jobs: Array<{ id?: string | number | null; data: { driveConnectionId?: string } }>,
+	driveConnectionId: string,
+): { id: string } | null => {
+	const matchingJob = jobs.find((job) => job.data.driveConnectionId === driveConnectionId);
+	if (!matchingJob || matchingJob.id === null || matchingJob.id === undefined) {
+		return null;
+	}
+
+	return { id: String(matchingJob.id) };
+};
+
+export const findQueuedDriveSyncJob = async (
+	driveConnectionId: string,
+): Promise<{ id: string } | null> => {
+	const jobs = await driveSyncQueue.getJobs([...DRIVE_SYNC_JOB_STATES]);
+	return selectQueuedDriveSyncJob(jobs, driveConnectionId);
+};
+
+export const enqueueDriveSyncJob = async (params: {
+	driveConnectionId: string;
+	userId: string;
+	forceFullSync: boolean;
+}): Promise<{ jobId: string; alreadyQueued: boolean }> => {
+	const queuedJob = await findQueuedDriveSyncJob(params.driveConnectionId);
+	if (queuedJob) {
+		return {
+			jobId: queuedJob.id,
+			alreadyQueued: true,
+		};
+	}
+
+	const queuedAt = Date.now();
+	const job = await driveSyncQueue.add(
+		"drive.sync",
+		{
+			driveConnectionId: params.driveConnectionId,
+			userId: params.userId,
+			forceFullSync: params.forceFullSync,
+		},
+		{
+			jobId: `sync-${params.driveConnectionId}-${queuedAt}`,
+			attempts: 3,
+			backoff: {
+				type: "exponential",
+				delay: 1500,
+			},
+		},
+	);
+
+	return {
+		jobId: String(job.id),
+		alreadyQueued: false,
+	};
+};
+
 export const closeQueueConnections = async () => {
 	await Promise.all([agentRunQueue.close(), driveSyncQueue.close(), driveIngestQueue.close()]);
 	await redisConnection.quit();
