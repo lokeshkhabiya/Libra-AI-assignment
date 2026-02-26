@@ -1,3 +1,5 @@
+import { extractText, getDocumentProxy } from "unpdf";
+
 import { ApiError } from "@libra-ai/drive-core";
 
 type ExtractTargetFile = {
@@ -92,13 +94,10 @@ const extractPdfText = async (drive: any, fileId: string): Promise<string> => {
 	);
 
 	const buffer = await responseDataToBuffer(response.data);
-	const pdfParseModule = await import("pdf-parse");
-	const pdfParse = (
-		"default" in pdfParseModule ? pdfParseModule.default : pdfParseModule
-	) as (dataBuffer: Buffer) => Promise<{ text?: string }>;
-	const parsed = await pdfParse(buffer);
+	const pdf = await getDocumentProxy(new Uint8Array(buffer));
+	const { text } = await extractText(pdf, { mergePages: true });
 
-	return parsed.text ?? "";
+	return text ?? "";
 };
 
 const extractTextFile = async (drive: any, fileId: string): Promise<string> => {

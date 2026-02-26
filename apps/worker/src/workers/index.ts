@@ -1,5 +1,6 @@
 import type { Worker } from "bullmq";
 
+import { startAgentRunWorker } from "./agent-run.worker";
 import { startDriveIngestWorker } from "./drive-ingest.worker";
 import { startDriveSyncWorker } from "./drive-sync.worker";
 
@@ -10,7 +11,7 @@ export const startWorkers = () => {
 		return;
 	}
 
-	workers = [startDriveSyncWorker(), startDriveIngestWorker()];
+	workers = [startAgentRunWorker(), startDriveSyncWorker(), startDriveIngestWorker()];
 };
 
 export const stopWorkers = async () => {

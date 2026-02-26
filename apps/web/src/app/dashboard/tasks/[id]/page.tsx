@@ -3,16 +3,24 @@ import { redirect } from "next/navigation";
 
 import { authClient } from "@/lib/auth-client";
 
-export default async function RootPage() {
+import DashboardShell from "../../dashboard";
+
+export default async function TaskDetailPage({
+	params,
+}: {
+	params: Promise<{ id: string }>;
+}) {
 	const session = await authClient.getSession({
 		fetchOptions: {
 			headers: await headers(),
+			throw: true,
 		},
 	});
 
-	if (session?.data?.user) {
-		redirect("/dashboard");
-	} else {
+	if (!session?.user) {
 		redirect("/login");
 	}
+
+	const { id } = await params;
+	return <DashboardShell initialTaskId={id} />;
 }

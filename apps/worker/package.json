@@ -18,7 +18,8 @@
     "dotenv": "catalog:",
     "googleapis": "^166.0.0",
     "openai": "^5.21.0",
-    "pdf-parse": "^2.4.4"
+    "server": "workspace:*",
+    "unpdf": "^1.4.0"
   },
   "devDependencies": {
     "@libra-ai/config": "workspace:*",

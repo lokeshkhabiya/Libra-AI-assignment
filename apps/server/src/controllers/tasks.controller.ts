@@ -82,7 +82,7 @@ export const createTaskController = async (
 			},
 		});
 
-		const jobId = `agent-task:${task.id}`;
+		const jobId = `agent-task-${task.id}`;
 
 		try {
 			await agentRunQueue.add(
@@ -367,7 +367,7 @@ export const cancelTaskController = async (
 			return;
 		}
 
-		const jobId = `agent-task:${task.id}`;
+		const jobId = `agent-task-${task.id}`;
 		let jobRemoved = false;
 		try {
 			const job = await agentRunQueue.getJob(jobId);

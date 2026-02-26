@@ -23,9 +23,13 @@ export default function LoginPage() {
 		return <Loader />;
 	}
 
-	return showSignIn ? (
-		<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
-	) : (
-		<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
+	return (
+		<div className="flex min-h-svh items-center justify-center px-4">
+			{showSignIn ? (
+				<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
+			) : (
+				<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
+			)}
+		</div>
 	);
 }

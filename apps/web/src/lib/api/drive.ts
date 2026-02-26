@@ -73,11 +73,16 @@ export const getDriveStatus = async (): Promise<DriveStatusResponse> => {
 	});
 };
 
-export const syncDrive = async (forceFullSync?: boolean): Promise<{ jobId: string }> => {
-	return apiFetch<{ jobId: string }>("/api/drive/sync", {
+export const syncDrive = async (
+	forceFullSync?: boolean,
+): Promise<{ jobId: string; queued?: boolean; alreadyQueued?: boolean }> => {
+	return apiFetch<{ jobId: string; queued?: boolean; alreadyQueued?: boolean }>(
+		"/api/drive/sync",
+		{
 		method: "POST",
 		body: JSON.stringify({ forceFullSync }),
-	});
+		},
+	);
 };
 
 export const listDriveFiles = async (params?: {
@@ -107,6 +112,10 @@ export const listDriveFiles = async (params?: {
 	return apiFetch<DriveFilesResponse>(path, {
 		method: "GET",
 	});
+};
+
+export const getDriveFileContentUrl = (fileId: string): string => {
+	return `${SERVER_URL}/api/drive/files/${fileId}/content`;
 };
 
 export const disconnectDrive = async (): Promise<void> => {

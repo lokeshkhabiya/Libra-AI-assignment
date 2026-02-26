@@ -8,12 +8,14 @@ import { getDriveConnectUrl } from "@/lib/api/drive";
 type DriveConnectButtonProps = {
 	connected: boolean;
 	busy?: boolean;
+	returnTo?: string;
 	onDisconnect?: () => Promise<void>;
 };
 
 export default function DriveConnectButton({
 	connected,
 	busy = false,
+	returnTo = "/dashboard/drive",
 	onDisconnect,
 }: DriveConnectButtonProps) {
 	if (!connected) {
@@ -21,7 +23,7 @@ export default function DriveConnectButton({
 			<Button
 				disabled={busy}
 				onClick={() => {
-					window.location.assign(getDriveConnectUrl("/dashboard/drive"));
+					window.location.assign(getDriveConnectUrl(returnTo));
 				}}
 			>
 				Connect Google Drive

@@ -84,8 +84,12 @@ export default function DriveDashboard() {
 	const onSync = async () => {
 		setIsSyncing(true);
 		try {
-			await syncDrive(false);
-			toast.success("Incremental sync queued");
+			const result = await syncDrive(false);
+			if (result.alreadyQueued) {
+				toast.message("A sync job is already in progress");
+			} else {
+				toast.success("Incremental sync queued");
+			}
 			await loadData();
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : "Failed to queue sync");

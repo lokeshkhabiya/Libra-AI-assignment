@@ -6,6 +6,13 @@ type PromptTool = {
 	parameters: Record<string, unknown>;
 };
 
+type PlannerDriveFile = {
+	driveFileId: string;
+	name: string;
+	mimeType: string;
+	lastIndexedAt: string | null;
+};
+
 const stringify = (value: unknown): string => {
 	return JSON.stringify(value, null, 2);
 };
@@ -32,18 +39,33 @@ export const buildPlannerSystemPrompt = (tools: PromptTool[]): string => {
 		"- Keep each step action-oriented and specific.",
 		"- Make toolInput minimal and valid for the target tool schema.",
 		"- Prefer evidence-gathering first, then synthesis.",
+		"- If indexed Drive files are provided and relevant, use vector_search and drive_retrieve.",
 		"",
 		"Available tools:",
 		toolsToPromptText(tools),
 	].join("\n");
 };
 
-export const buildPlannerUserPrompt = (taskPrompt: string, maxSteps: number): string => {
-	return [
-		`Task: ${taskPrompt}`,
-		`Maximum steps: ${maxSteps}`,
+export const buildPlannerUserPrompt = (params: {
+	taskPrompt: string;
+	maxSteps: number;
+	indexedDriveFiles?: PlannerDriveFile[];
+}): string => {
+	const sections = [
+		`Task: ${params.taskPrompt}`,
+		`Maximum steps: ${params.maxSteps}`,
 		"Produce the best plan now.",
-	].join("\n");
+	];
+
+	if (params.indexedDriveFiles && params.indexedDriveFiles.length > 0) {
+		sections.push(
+			`Indexed Drive files (for reference when planning):\n${stringify(
+				params.indexedDriveFiles,
+			)}`,
+		);
+	}
+
+	return sections.join("\n\n");
 };
 
 export const buildObserverSystemPrompt = (tools: PromptTool[]): string => {

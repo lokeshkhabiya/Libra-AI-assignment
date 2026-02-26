@@ -1,6 +1,8 @@
 import { env } from "@libra-ai/env/server";
 import OpenAI from "openai";
 
+import { logger } from "@/agent/logger";
+
 const openai = new OpenAI({
 	apiKey: env.OPENAI_API_KEY,
 });
@@ -15,6 +17,7 @@ type LlmMessage = {
 type JsonCompletionParams = {
 	messages: LlmMessage[];
 	model?: string;
+	label?: string;
 	temperature?: number;
 	maxOutputTokens?: number;
 	signal?: AbortSignal;
@@ -49,24 +52,53 @@ const extractCompletionText = (content: unknown): string => {
 export const createJsonCompletion = async <T>({
 	messages,
 	model = DEFAULT_AGENT_MODEL,
+	label = "llm",
 	temperature = 0.2,
 	maxOutputTokens = 1800,
 	signal,
 }: JsonCompletionParams): Promise<T> => {
-	const completion = await openai.chat.completions.create(
-		{
-			model,
-			temperature,
-			max_completion_tokens: maxOutputTokens,
-			response_format: {
-				type: "json_object",
+	const startMs = Date.now();
+
+	logger.debug(`${label}:call:start`, {
+		model,
+		messageCount: messages.length,
+		maxOutputTokens,
+	});
+
+	let completion: Awaited<ReturnType<typeof openai.chat.completions.create>>;
+	try {
+		completion = await openai.chat.completions.create(
+			{
+				model,
+				temperature,
+				max_completion_tokens: maxOutputTokens,
+				response_format: {
+					type: "json_object",
+				},
+				messages,
 			},
-			messages,
-		},
-		{
-			signal,
-		},
-	);
+			{
+				signal,
+			},
+		);
+	} catch (error) {
+		const durationMs = Date.now() - startMs;
+		logger.error(`${label}:call:error`, {
+			model,
+			durationMs,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		throw error;
+	}
+
+	const durationMs = Date.now() - startMs;
+	logger.debug(`${label}:call:end`, {
+		model,
+		durationMs,
+		promptTokens: completion.usage?.prompt_tokens,
+		completionTokens: completion.usage?.completion_tokens,
+		finishReason: completion.choices[0]?.finish_reason,
+	});
 
 	const content = extractCompletionText(completion.choices[0]?.message?.content);
 	if (!content) {
@@ -77,6 +109,11 @@ export const createJsonCompletion = async <T>({
 		return JSON.parse(content) as T;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "Unknown parse error";
+		logger.error(`${label}:parse:error`, {
+			model,
+			error: message,
+			contentPreview: content.slice(0, 200),
+		});
 		throw new Error(`LLM returned invalid JSON: ${message}`);
 	}
 };

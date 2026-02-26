@@ -2,6 +2,7 @@ import prisma from "@libra-ai/db";
 import { sanitizeDbText } from "@libra-ai/drive-core";
 
 import { createAgentContext } from "@/agent/context";
+import { createTaskLogger } from "@/agent/logger";
 import { finalizeAgentOutput, createInitialPlan, observeAfterStep } from "@/agent/planner";
 import { getRegisteredTools, getTool } from "@/agent/tools/registry";
 import type { ToolResult } from "@/agent/tools/types";
@@ -159,23 +160,29 @@ const fallbackFinalResult = (
 	evidence: FinalizationEvidence[],
 	citations: CitationInput[],
 ): FinalizerOutput => {
-	const evidenceSummary =
-		evidence.length === 0
-			? "No evidence was produced by tool execution."
-			: evidence
-					.map((item) => `Step ${item.stepNumber}: ${item.summary}`)
+	const successfulEvidence = evidence.filter((e) => e.success);
+
+	const researchLines =
+		successfulEvidence.length > 0
+			? successfulEvidence
 					.slice(0, 6)
-					.join("\n");
+					.map((e) => `- **${e.toolName.replace(/_/g, " ")}**: ${e.description}`)
+			: ["- No research steps completed successfully."];
 
 	return {
-		summary: "Agent run completed with fallback summarization.",
+		summary: `Completed ${successfulEvidence.length} research step${successfulEvidence.length === 1 ? "" : "s"}. Synthesis was unavailable.`,
 		answerMarkdown: [
-			`Task: ${taskPrompt}`,
+			`**Query:** ${taskPrompt}`,
 			"",
-			"### Execution Summary",
-			evidenceSummary,
+			"The agent completed its research but was unable to synthesize a final answer in the expected format. The steps below summarize what was gathered.",
+			"",
+			"**Research completed:**",
+			...researchLines,
+			...(citations.length > 0
+				? ["", "_See citations below for the sources gathered._"]
+				: []),
 		].join("\n"),
-		confidence: evidence.length > 0 ? "medium" : "low",
+		confidence: successfulEvidence.length > 0 ? "low" : "low",
 		citations,
 	};
 };
@@ -197,6 +204,42 @@ const loadTask = async (taskId: string): Promise<AgentTaskRuntime> => {
 	}
 
 	return task;
+};
+
+const loadIndexedDriveFilesForPlanning = async (
+	userId: string,
+): Promise<
+	Array<{
+		driveFileId: string;
+		name: string;
+		mimeType: string;
+		lastIndexedAt: string | null;
+	}>
+> => {
+	const files = await prisma.driveFile.findMany({
+		where: {
+			userId,
+			isDeleted: false,
+			indexStatus: "INDEXED",
+		},
+		orderBy: {
+			lastIndexedAt: "desc",
+		},
+		take: 20,
+		select: {
+			id: true,
+			name: true,
+			mimeType: true,
+			lastIndexedAt: true,
+		},
+	});
+
+	return files.map((file) => ({
+		driveFileId: file.id,
+		name: file.name,
+		mimeType: file.mimeType,
+		lastIndexedAt: file.lastIndexedAt ? file.lastIndexedAt.toISOString() : null,
+	}));
 };
 
 const persistTaskCitations = async (
@@ -249,7 +292,25 @@ export const runAgentTask = async (
 	task: AgentTaskRuntime,
 	ctx: AgentContext,
 ): Promise<FinalizerOutput> => {
+	const log = createTaskLogger(task.id);
+	const taskStartMs = Date.now();
+
+	log.info("agent:task:start", {
+		userId: task.userId,
+		maxSteps: task.maxSteps,
+		model: task.model ?? "default",
+		promptPreview: task.prompt.slice(0, 120),
+	});
+
 	const tools = getRegisteredTools();
+	const indexedDriveFiles = await loadIndexedDriveFilesForPlanning(task.userId);
+
+	log.info("agent:task:context", {
+		toolCount: tools.length,
+		tools: tools.map((t) => t.name),
+		indexedDriveFileCount: indexedDriveFiles.length,
+	});
+
 	let stepNumber = 1;
 	let stepsCompleted = 0;
 
@@ -279,12 +340,18 @@ export const runAgentTask = async (
 		const plan = await createInitialPlan({
 			taskPrompt: task.prompt,
 			maxSteps: task.maxSteps,
+			indexedDriveFiles,
 			model: task.model ?? undefined,
 			ctx,
 			tools,
 		});
 
 		pendingPlanSteps.push(...plan.steps);
+
+		log.info("agent:plan:persisted", {
+			stepCount: plan.steps.length,
+			plannedTools: plan.steps.map((s) => s.toolName),
+		});
 
 		await prisma.agentStep.create({
 			data: {
@@ -317,6 +384,12 @@ export const runAgentTask = async (
 
 			const tool = getTool(currentStep.toolName);
 			if (!tool) {
+				log.warn("agent:tool:missing", {
+					toolName: currentStep.toolName,
+					stepNumber,
+					description: currentStep.description,
+				});
+
 				const missingSummary = sanitizeDbText(
 					`Tool ${currentStep.toolName} is not registered`,
 				);
@@ -361,6 +434,13 @@ export const runAgentTask = async (
 				},
 			});
 
+			log.info("agent:tool:start", {
+				toolName: currentStep.toolName,
+				stepNumber: runningStep.stepNumber,
+				description: currentStep.description.slice(0, 100),
+				inputPreview: JSON.stringify(currentStep.toolInput).slice(0, 200),
+			});
+
 			ctx.emit({
 				type: "step:start",
 				taskId: task.id,
@@ -370,10 +450,17 @@ export const runAgentTask = async (
 				description: currentStep.description,
 			});
 
+			const toolStartMs = Date.now();
 			let toolResult: ToolResult;
 			try {
 				toolResult = await tool.execute(currentStep.toolInput, ctx);
 			} catch (error) {
+				log.error("agent:tool:threw", {
+					toolName: currentStep.toolName,
+					stepNumber: runningStep.stepNumber,
+					error: safeErrorMessage(error),
+					durationMs: Date.now() - toolStartMs,
+				});
 				toolResult = {
 					success: false,
 					data: {
@@ -382,8 +469,18 @@ export const runAgentTask = async (
 				};
 			}
 
+			const toolDurationMs = Date.now() - toolStartMs;
 			const toolSummary = toStepSummary(currentStep, toolResult);
 			const stepStatus = toolResult.success ? "COMPLETED" : "FAILED";
+
+			log.info("agent:tool:done", {
+				toolName: currentStep.toolName,
+				stepNumber: runningStep.stepNumber,
+				success: toolResult.success,
+				durationMs: toolDurationMs,
+				citationCount: toolResult.citations?.length ?? 0,
+				truncated: toolResult.truncated ?? false,
+			});
 			await prisma.agentStep.update({
 				where: {
 					id: runningStep.id,
@@ -452,12 +549,17 @@ export const runAgentTask = async (
 					model: task.model ?? undefined,
 					ctx,
 					tools,
+					stepNumber: runningStep.stepNumber,
 					recentSummaries,
 					lastStep: currentStep,
 					lastResult: toolResult,
 					remainingPlannedSteps: pendingPlanSteps,
 				});
 			} catch (error) {
+				log.warn("agent:observe:error", {
+					stepNumber: runningStep.stepNumber,
+					error: safeErrorMessage(error),
+				});
 				observation = {
 					action: "continue",
 					reasoning: `Observer failed: ${safeErrorMessage(error)}. Continuing.`,
@@ -496,6 +598,12 @@ export const runAgentTask = async (
 			}
 		}
 
+		log.info("agent:finalize:start", {
+			stepsCompleted,
+			evidenceCount: evidence.length,
+			gatheredCitationCount: gatheredCitations.length,
+		});
+
 		const finalStep = await prisma.agentStep.create({
 			data: {
 				taskId: task.id,
@@ -517,7 +625,12 @@ export const runAgentTask = async (
 				evidence,
 				citations: gatheredCitations,
 			});
-		} catch {
+		} catch (finalizeError) {
+			log.error("agent:finalize:error", {
+				error: safeErrorMessage(finalizeError),
+				evidenceCount: evidence.length,
+				usingFallback: true,
+			});
 			finalResult = fallbackFinalResult(task.prompt, evidence, gatheredCitations);
 		}
 
@@ -556,6 +669,13 @@ export const runAgentTask = async (
 			},
 		});
 
+		log.info("agent:task:complete", {
+			stepsCompleted,
+			citationCount: finalCitations.length,
+			confidence: normalizedFinalResult.confidence,
+			durationMs: Date.now() - taskStartMs,
+		});
+
 		ctx.emit({
 			type: "complete",
 			taskId: task.id,
@@ -566,6 +686,19 @@ export const runAgentTask = async (
 	} catch (error) {
 		const canceled = ctx.abortSignal.aborted || isAbortError(error);
 		const errorMessage = safeErrorMessage(error);
+
+		if (canceled) {
+			log.info("agent:task:canceled", {
+				stepsCompleted,
+				durationMs: Date.now() - taskStartMs,
+			});
+		} else {
+			log.error("agent:task:failed", {
+				stepsCompleted,
+				error: errorMessage,
+				durationMs: Date.now() - taskStartMs,
+			});
+		}
 
 		await prisma.agentTask.update({
 			where: { id: task.id },

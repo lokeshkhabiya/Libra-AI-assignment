@@ -11,6 +11,7 @@ import {
 	deleteUserNamespace,
 	exchangeCodeAndUpsertConnection,
 	FULL_SYNC_JOB_NAME,
+	getAuthorizedDriveClient,
 	revokeConnectionTokens,
 	sanitizeDbText,
 	verifyDriveOAuthState,
@@ -30,6 +31,10 @@ const filesQuerySchema = z.object({
 		.transform((value) => value === "true"),
 });
 
+const driveFileParamsSchema = z.object({
+	fileId: z.string().min(1),
+});
+
 const toClientRedirectUrl = (path: string, params?: Record<string, string>): string => {
 	const url = new URL(path, env.CORS_ORIGIN);
 	if (params) {
@@ -47,6 +52,55 @@ const ensureAuth = (req: Request): AuthenticatedRequest => {
 		throw new ApiError(401, "UNAUTHORIZED", "Authentication required");
 	}
 	return typed;
+};
+
+const findQueuedSyncJob = async (
+	driveConnectionId: string,
+): Promise<{ id: string } | null> => {
+	const jobs = await driveSyncQueue.getJobs(["waiting", "active", "delayed", "prioritized"]);
+	const matchingJob = jobs.find((job) => job.data.driveConnectionId === driveConnectionId);
+	if (!matchingJob) {
+		return null;
+	}
+
+	return { id: String(matchingJob.id) };
+};
+
+const enqueueDriveSyncJob = async (params: {
+	driveConnectionId: string;
+	userId: string;
+	forceFullSync: boolean;
+}): Promise<{ jobId: string; alreadyQueued: boolean }> => {
+	const queuedJob = await findQueuedSyncJob(params.driveConnectionId);
+	if (queuedJob) {
+		return {
+			jobId: queuedJob.id,
+			alreadyQueued: true,
+		};
+	}
+
+	const queuedAt = Date.now();
+	const job = await driveSyncQueue.add(
+		FULL_SYNC_JOB_NAME,
+		{
+			driveConnectionId: params.driveConnectionId,
+			userId: params.userId,
+			forceFullSync: params.forceFullSync,
+		},
+		{
+			jobId: `sync-${params.driveConnectionId}-${queuedAt}`,
+			attempts: 3,
+			backoff: {
+				type: "exponential",
+				delay: 1500,
+			},
+		},
+	);
+
+	return {
+		jobId: String(job.id),
+		alreadyQueued: false,
+	};
 };
 
 export const connectDriveController = async (
@@ -103,22 +157,11 @@ export const callbackDriveController = async (
 			code,
 		);
 
-		await driveSyncQueue.add(
-			FULL_SYNC_JOB_NAME,
-			{
-				driveConnectionId: connectionId,
-				userId: authReq.auth.user.id,
-				forceFullSync: true,
-			},
-			{
-				jobId: `sync-${connectionId}`,
-				attempts: 3,
-				backoff: {
-					type: "exponential",
-					delay: 1500,
-				},
-			},
-		);
+		await enqueueDriveSyncJob({
+			driveConnectionId: connectionId,
+			userId: authReq.auth.user.id,
+			forceFullSync: true,
+		});
 
 		const redirectUrl = toClientRedirectUrl(parsedState.returnTo, {
 			connected: "1",
@@ -219,26 +262,16 @@ export const syncDriveController = async (
 			throw new ApiError(400, "NO_ACTIVE_CONNECTION", "Google Drive is not connected");
 		}
 
-		const job = await driveSyncQueue.add(
-			FULL_SYNC_JOB_NAME,
-			{
-				driveConnectionId: connection.id,
-				userId: authReq.auth.user.id,
-				forceFullSync: body.data.forceFullSync,
-			},
-			{
-				jobId: `sync-${connection.id}`,
-				attempts: 3,
-				backoff: {
-					type: "exponential",
-					delay: 1500,
-				},
-			},
-		);
+		const queueResult = await enqueueDriveSyncJob({
+			driveConnectionId: connection.id,
+			userId: authReq.auth.user.id,
+			forceFullSync: body.data.forceFullSync ?? false,
+		});
 
 		res.status(202).json({
-			queued: true,
-			jobId: job.id,
+			queued: !queueResult.alreadyQueued,
+			alreadyQueued: queueResult.alreadyQueued,
+			jobId: queueResult.jobId,
 		});
 	} catch (error) {
 		next(error);
@@ -296,6 +329,70 @@ export const listDriveFilesController = async (
 			total,
 			items,
 		});
+	} catch (error) {
+		next(error);
+	}
+};
+
+export const getDriveFileContentController = async (
+	req: Request,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const authReq = ensureAuth(req);
+		const parsedParams = driveFileParamsSchema.safeParse(req.params ?? {});
+		if (!parsedParams.success) {
+			throw new ApiError(400, "INVALID_FILE_ID", parsedParams.error.message);
+		}
+		const fileId = parsedParams.data.fileId;
+
+		const file = await prisma.driveFile.findFirst({
+			where: {
+				id: fileId,
+				userId: authReq.auth.user.id,
+				isDeleted: false,
+			},
+			include: {
+				connection: true,
+			},
+		});
+
+		if (!file) {
+			throw new ApiError(404, "FILE_NOT_FOUND", "File not found");
+		}
+
+		const { drive } = await getAuthorizedDriveClient({
+			userId: authReq.auth.user.id,
+			connectionId: file.connectionId,
+		});
+
+		const isGoogleDoc = file.mimeType === "application/vnd.google-apps.document";
+		const isPdf = file.mimeType === "application/pdf";
+
+		if (isGoogleDoc) {
+			const exported = await drive.files.export(
+				{ fileId: file.googleFileId, mimeType: "text/plain" },
+				{ responseType: "text" },
+			);
+			res.setHeader("Content-Type", "text/plain; charset=utf-8");
+			res.send(exported.data);
+		} else if (isPdf) {
+			const downloaded = await drive.files.get(
+				{ fileId: file.googleFileId, alt: "media" },
+				{ responseType: "arraybuffer" },
+			);
+			res.setHeader("Content-Type", "application/pdf");
+			res.setHeader("Content-Disposition", `inline; filename="${file.name}"`);
+			res.send(Buffer.from(downloaded.data as ArrayBuffer));
+		} else {
+			const downloaded = await drive.files.get(
+				{ fileId: file.googleFileId, alt: "media" },
+				{ responseType: "text" },
+			);
+			res.setHeader("Content-Type", file.mimeType || "text/plain");
+			res.send(downloaded.data);
+		}
 	} catch (error) {
 		next(error);
 	}
