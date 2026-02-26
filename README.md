@@ -2,6 +2,16 @@
 
 An autonomous AI research agent with a polished chat UI that takes natural-language tasks, plans multi-step execution strategies, dynamically selects tools (web search, web scraping, Google Drive retrieval, vector search), iterates on results, and returns structured answers with citations — all built from scratch without agent frameworks.
 
+## Demo Videos
+
+<a href="https://youtu.be/NVqorjcmXyo" target="_blank">
+  <img src="https://img.youtube.com/vi/NVqorjcmXyo/maxresdefault.jpg" width="560" alt="Libra AI Demo Video 1">
+</a>
+
+<a href="https://youtu.be/vR_Bs_w1t1c" target="_blank">
+  <img src="https://img.youtube.com/vi/vR_Bs_w1t1c/maxresdefault.jpg" width="560" alt="Libra AI Demo Video 2">
+</a>
+
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![Express](https://img.shields.io/badge/Express-4.x-green)
@@ -959,15 +969,15 @@ Three Zustand stores manage all client state:
 ```mermaid
 flowchart LR
     subgraph Stores
-        CS[Chat Store<br/>messages, tasks, steps,<br/>citations, SSE, streaming]
-        DS[Drive Store<br/>connection status,<br/>file counts]
-        AS[Auth Store<br/>session, user,<br/>auth status]
+        CS[Chat Store]
+        DS[Drive Store]
+        AS[Auth Store]
     end
 
     subgraph Components
         CHAT[Chat UI]
         DRIVE[Drive Dashboard]
-        HEADER[Header / Auth]
+        HEADER[Header and Auth]
     end
 
     CS --> CHAT
@@ -994,22 +1004,22 @@ The chat store is the most complex piece (~758 lines), managing:
 
 ```mermaid
 flowchart TD
-    SHELL[DashboardShell] --> SIDEBAR[TaskSidebar<br/>Task history list]
-    SHELL --> HEADER[Header<br/>User menu, Drive status]
-    SHELL --> MESSAGES[ChatMessageList<br/>Scrollable message view]
-    SHELL --> INPUT[ChatInputBar<br/>Text input + file attach]
-    SHELL --> CITPANEL[CitationPanel<br/>PDF/text side drawer]
-    SHELL --> PICKER[DriveFilePicker<br/>Google Picker modal]
-    SHELL --> CONNECT[DriveConnectDialog<br/>First-run prompt]
+    SHELL[DashboardShell] --> SIDEBAR[TaskSidebar]
+    SHELL --> HEADER[Header]
+    SHELL --> MESSAGES[ChatMessageList]
+    SHELL --> INPUT[ChatInputBar]
+    SHELL --> CITPANEL[CitationPanel]
+    SHELL --> PICKER[DriveFilePicker]
+    SHELL --> CONNECT[DriveConnectDialog]
 
-    MESSAGES --> USERMSG[UserMessage<br/>User bubble + file badges]
-    MESSAGES --> ASTMSG[AssistantMessage<br/>Markdown + steps + citations]
+    MESSAGES --> USERMSG[UserMessage]
+    MESSAGES --> ASTMSG[AssistantMessage]
 
     ASTMSG --> STEPS[StepProgress]
     ASTMSG --> CITLIST[CitationList]
 
-    STEPS --> PLAN_VIEW[Execution Plan<br/>Checkmark todo list]
-    STEPS --> LIVE_VIEW[Live Execution<br/>Tool results + observer reasoning]
+    STEPS --> PLAN_VIEW[Execution Plan]
+    STEPS --> LIVE_VIEW[Live Execution]
 ```
 
 **Key UI features:**
