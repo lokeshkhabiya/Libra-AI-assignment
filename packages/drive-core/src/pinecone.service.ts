@@ -53,7 +53,7 @@ export async function upsertDocuments(
 	userId: string,
 	records: DocumentRecord[],
 ): Promise<void> {
-	await upsert<DocumentMetadata>({ userId, records });
+	await upsert({ userId, records });
 }
 
 export async function searchDocuments(

@@ -27,11 +27,13 @@ const listTasksQuerySchema = z.object({
 });
 
 const ensureAuth = (req: Request): AuthenticatedRequest => {
-	const typed = req as AuthenticatedRequest;
-	if (!typed.auth?.user?.id) {
+	const typedRequest = req as AuthenticatedRequest;
+
+	if (!typedRequest.auth?.user?.id) {
 		throw new ApiError(401, "UNAUTHORIZED", "Authentication required");
 	}
-	return typed;
+
+	return typedRequest;
 };
 
 const ensureTaskOwnership = async (taskId: string, userId: string) => {

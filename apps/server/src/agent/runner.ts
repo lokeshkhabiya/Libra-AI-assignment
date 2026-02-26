@@ -160,7 +160,7 @@ const fallbackFinalResult = (
 	evidence: FinalizationEvidence[],
 	citations: CitationInput[],
 ): FinalizerOutput => {
-	const successfulEvidence = evidence.filter((e) => e.success);
+	const successfulEvidence = evidence.filter((item) => item.success);
 
 	const researchLines =
 		successfulEvidence.length > 0
@@ -182,7 +182,7 @@ const fallbackFinalResult = (
 				? ["", "_See citations below for the sources gathered._"]
 				: []),
 		].join("\n"),
-		confidence: successfulEvidence.length > 0 ? "low" : "low",
+		confidence: "low",
 		citations,
 	};
 };

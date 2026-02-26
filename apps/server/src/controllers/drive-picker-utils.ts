@@ -9,39 +9,41 @@ export const buildDriveFileContentHash = (file: {
 	modifiedTime?: string | null;
 	md5Checksum?: string | null;
 }): string => {
-	if (file.md5Checksum) {
-		return file.md5Checksum;
+	const { id, modifiedTime, md5Checksum } = file;
+
+	if (md5Checksum) {
+		return md5Checksum;
 	}
 
-	if (file.modifiedTime) {
-		return `${file.id}:${file.modifiedTime}`;
+	if (modifiedTime) {
+		return `${id}:${modifiedTime}`;
 	}
 
-	return `${file.id}:nohash`;
+	return `${id}:nohash`;
 };
 
-export const shouldQueuePickerIngest = (params: {
+export const shouldQueuePickerIngest = ({
+	existing,
+	contentHash,
+}: {
 	existing?: ExistingPickerDriveFile | null;
 	contentHash: string;
 }): boolean => {
-	const existing = params.existing;
 	if (!existing) {
 		return true;
 	}
 
+	const { contentHash: existingContentHash, isDeleted, indexStatus } = existing;
+
 	return (
-		existing.contentHash !== params.contentHash ||
-		existing.isDeleted ||
-		existing.indexStatus !== "INDEXED"
+		existingContentHash !== contentHash || isDeleted || indexStatus !== "INDEXED"
 	);
 };
 
 export const normalizePickerGoogleFileIds = (googleFileIds: string[]): string[] => {
-	return Array.from(
-		new Set(
-			googleFileIds
-				.map((value) => value.trim())
-				.filter((value) => value.length > 0),
-		),
-	);
+	const normalizedIds = googleFileIds
+		.map((id) => id.trim())
+		.filter((id) => id.length > 0);
+
+	return Array.from(new Set(normalizedIds));
 };

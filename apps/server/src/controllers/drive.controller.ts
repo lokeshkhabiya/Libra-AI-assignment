@@ -55,6 +55,7 @@ const pickerTokenResponseSchema = z.object({
 
 const toClientRedirectUrl = (path: string, params?: Record<string, string>): string => {
 	const url = new URL(path, env.CORS_ORIGIN);
+
 	if (params) {
 		for (const [key, value] of Object.entries(params)) {
 			url.searchParams.set(key, value);
@@ -68,6 +69,7 @@ const DEFAULT_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 const getAutoSyncIntervalMs = (): number => {
 	const rawValue = process.env.DRIVE_AUTO_SYNC_INTERVAL_MS;
+
 	if (!rawValue) {
 		return DEFAULT_AUTO_SYNC_INTERVAL_MS;
 	}
@@ -81,11 +83,13 @@ const getAutoSyncIntervalMs = (): number => {
 };
 
 const ensureAuth = (req: Request): AuthenticatedRequest => {
-	const typed = req as AuthenticatedRequest;
-	if (!typed.auth?.user?.id) {
+	const typedRequest = req as AuthenticatedRequest;
+
+	if (!typedRequest.auth?.user?.id) {
 		throw new ApiError(401, "UNAUTHORIZED", "Authentication required");
 	}
-	return typed;
+
+	return typedRequest;
 };
 
 const toDate = (value: string | null | undefined): Date | null => {
@@ -101,7 +105,11 @@ const toDate = (value: string | null | undefined): Date | null => {
 	return parsed;
 };
 
-const enqueueIngestJob = async (params: {
+const enqueueIngestJob = async ({
+	driveFileId,
+	userId,
+	forceReingest,
+}: {
 	driveFileId: string;
 	userId: string;
 	forceReingest: boolean;
@@ -109,9 +117,9 @@ const enqueueIngestJob = async (params: {
 	await driveIngestQueue.add(
 		INGEST_JOB_NAME,
 		{
-			driveFileId: params.driveFileId,
-			userId: params.userId,
-			forceReingest: params.forceReingest,
+			driveFileId,
+			userId,
+			forceReingest,
 		},
 		{
 			attempts: 3,
@@ -130,7 +138,8 @@ export const connectDriveController = async (
 ): Promise<void> => {
 	try {
 		const authReq = req as AuthenticatedRequest;
-		const returnTo = typeof req.query.returnTo === "string" ? req.query.returnTo : "/dashboard/drive";
+		const returnTo =
+			typeof req.query.returnTo === "string" ? req.query.returnTo : "/dashboard/drive";
 
 		const { url } = createDriveOAuthUrl(authReq.auth.user.id, returnTo);
 		if (req.query.redirect === "false") {

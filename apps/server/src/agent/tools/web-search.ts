@@ -17,9 +17,12 @@ const firecrawlWebItemSchema = z.object({
 const firecrawlSearchResponseSchema = z.object({
 	success: z.boolean(),
 	data: z
-		.object({
-			web: z.array(firecrawlWebItemSchema).optional(),
-		})
+		.union([
+			z.array(firecrawlWebItemSchema),
+			z.object({
+				web: z.array(firecrawlWebItemSchema).optional(),
+			}),
+		])
 		.optional(),
 });
 
@@ -112,7 +115,8 @@ export const webSearchTool: ToolDefinition = {
 				};
 			}
 
-			const web = payload.data.data?.web ?? [];
+			const data = payload.data.data;
+			const web = Array.isArray(data) ? data : data?.web ?? [];
 			const results = toResults(web, parsedInput.data.numResults);
 			const citations = results
 				.filter((result) => result.url.length > 0)

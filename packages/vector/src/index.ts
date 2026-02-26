@@ -13,10 +13,8 @@ const index = pc.index({ name: env.PINECONE_INDEX });
 
 const toNamespace = (userId: string) => `user_${userId}`;
 
-type IndexMode = "vector" | "integrated";
-
 type IndexRuntime = {
-	mode: IndexMode;
+	mode: "vector" | "integrated";
 	textFieldKey: string;
 	vectorDimension: number | null;
 };
@@ -73,14 +71,9 @@ const getIndexRuntime = async (): Promise<IndexRuntime> => {
 	return runtimePromise;
 };
 
-export const getIndexMode = async (): Promise<IndexMode> => {
+export const getIndexMode = async (): Promise<"vector" | "integrated"> => {
 	const runtime = await getIndexRuntime();
 	return runtime.mode;
-};
-
-export const getIntegratedTextFieldKey = async (): Promise<string> => {
-	const runtime = await getIndexRuntime();
-	return runtime.textFieldKey;
 };
 
 export const getIndexVectorDimension = async (): Promise<number | null> => {
@@ -88,23 +81,20 @@ export const getIndexVectorDimension = async (): Promise<number | null> => {
 	return runtime.vectorDimension;
 };
 
-export type UpsertRecord<T extends RecordMetadata = RecordMetadata> = {
+export type UpsertRecord = {
 	id: string;
 	values?: number[];
-	metadata?: T;
+	metadata?: RecordMetadata;
 	content?: string;
 };
 
-export type UpsertParams<T extends RecordMetadata = RecordMetadata> = {
+export type UpsertParams = {
 	userId: string;
-	records: Array<UpsertRecord<T>>;
+	records: UpsertRecord[];
 	batchSize?: number;
 };
 
-const toIntegratedRecord = <T extends RecordMetadata = RecordMetadata>(
-	record: UpsertRecord<T>,
-	textFieldKey: string,
-) => {
+const toIntegratedRecord = (record: UpsertRecord, textFieldKey: string) => {
 	const content =
 		record.content ??
 		(typeof record.metadata?.[textFieldKey] === "string"
@@ -124,11 +114,11 @@ const toIntegratedRecord = <T extends RecordMetadata = RecordMetadata>(
 	};
 };
 
-export const upsert = async <T extends RecordMetadata = RecordMetadata>({
+export const upsert = async ({
 	userId,
 	records,
 	batchSize = 96,
-}: UpsertParams<T>): Promise<void> => {
+}: UpsertParams): Promise<void> => {
 	const namespace = toNamespace(userId);
 	const runtime = await getIndexRuntime();
 
@@ -153,11 +143,12 @@ export const upsert = async <T extends RecordMetadata = RecordMetadata>({
 				);
 			}
 
-			const vectorRecord: PineconeRecord<T> = {
+			const vectorRecord: PineconeRecord<RecordMetadata> = {
 				id: record.id,
 				values: record.values,
 				metadata: record.metadata,
 			};
+
 			return vectorRecord;
 		});
 

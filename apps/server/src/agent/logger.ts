@@ -76,5 +76,3 @@ export const createTaskLogger = (taskId: string) => {
 		error: (message: string, context?: LogContext) => base("error", message, context),
 	};
 };
-
-export type TaskLogger = ReturnType<typeof createTaskLogger>;
